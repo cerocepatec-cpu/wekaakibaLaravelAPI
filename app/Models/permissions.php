@@ -9,6 +9,7 @@ class Permission extends Model
     use HasFactory;
 
     protected $table = 'permissions';
+    protected $visible = ['id', 'name'];
 
     protected $fillable = [
         'name',          // requis Spatie

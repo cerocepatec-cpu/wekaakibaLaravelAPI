@@ -38,77 +38,97 @@ class AuthController extends Controller
         ], 201);
     }
 
-// Login
-  public function login(Request $request)
+    // Login
+   public function login(Request $request)
     {
         DB::beginTransaction();
 
         try {
             $data = $request->validate([
-                'login'    => 'required|string', // email ou user_name
+                'login'    => 'required|string',
                 'password' => 'required|string',
             ]);
 
             $field = filter_var($data['login'], FILTER_VALIDATE_EMAIL) ? 'email' : 'user_name';
 
-            $user = User::leftJoin('usersenterprises as UE', 'users.id','=','UE.user_id')
+            $user = User::leftJoin('usersenterprises as UE', 'users.id', '=', 'UE.user_id')
                         ->where('users.' . $field, $data['login'])
                         ->where('users.status', 'enabled')
-                        ->select('users.*','UE.enterprise_id')
+                        ->select('users.*', 'UE.enterprise_id')
                         ->first();
 
             if (!$user || !Hash::check($data['password'], $user->password)) {
                 return $this->errorResponse('Les identifiants sont invalides.', 401);
             }
 
-            // Ajouter l'entreprise active si nécessaire
+            // Entreprise active
             $actualEse = $this->getEse($user->id);
             if ($actualEse) {
                 $user->enterprise_id = $actualEse['id'];
             }
 
-            // Révoquer les anciens tokens
+            // Supprimer anciens tokens
             $user->tokens()->delete();
 
-            // Créer access token
-            $accessToken = $user->createToken('api_token')->plainTextToken;
-            if (!$accessToken) {
-                throw new \Exception('Impossible de générer le token d’accès.');
-            }
+            // ✅ Créer access token (en min)
+          $tokenExpiration = Carbon::now()->addMinutes(2);
 
-            // Créer refresh token
+// Génération du token en clair
+$plainTextToken = Str::random(80);
+
+// Création du token via la relation tokens()
+$token = $user->tokens()->create([
+    'name'        => 'api_token',                  // Nom du token
+    'token'       => hash('sha256', $plainTextToken), // Hash SHA256, 64 chars
+    'abilities'   => json_encode(['*']),           // JSON ou texte
+    'last_used_at'=> null,                         // au départ null
+    'expires_at'  => $tokenExpiration,            // expiration du token
+    'created_at'  => now(),
+    'updated_at'  => now(),
+]);
+
+// Access token à renvoyer au frontend
+$accessToken = $user->getKey() . '|' . $plainTextToken;
+
+            // ✅ Créer refresh token (1 jour)
             $refreshTokenString = Str::random(64);
-            $refreshToken = RefreshToken::create([
+            $refreshToken=RefreshToken::create([
                 'user_id'    => $user->id,
                 'token'      => hash('sha256', $refreshTokenString),
-                'expires_at' => Carbon::now()->addDays(7),
+                'expires_at' => Carbon::now()->addDay(),
                 'revoked'    => false,
             ]);
 
-            if (!$refreshToken) {
-                throw new \Exception('Impossible de générer le refresh token.');
+            // Gestion super_admin
+            if ($user->user_type === 'super_admin') {
+                $rolesCount = $user->roles()->count();
+                $permissionsCount = $user->permissions()->count();
+                if ($rolesCount === 0 && $permissionsCount === 0) {
+                    $allPermissions = \Spatie\Permission\Models\Permission::all();
+                    $user->syncPermissions($allPermissions);
+                }
             }
 
-            // Récupérer roles et permissions
             $roles = $user->getRoleNames();
-            $permissions = $user->getAllPermissions()->pluck('name');
+            $permissions = $user->getAllPermissions()->map(fn($p) => ['id' => $p->id, 'name' => $p->name]);
 
-            DB::commit(); // tout est ok, on valide
+            DB::commit();
 
             return $this->successResponse('success', [
                 'user'           => $user,
                 'enterprise'     => $actualEse,
                 'defaultmoney'   => $this->defaultmoney($actualEse['id'] ?? null),
                 'access_token'   => $accessToken,
-                'expires_in'     => 900,
+                'expires_in'     => 120, // 15 min
                 'refresh_token'  => $refreshTokenString,
+                'refresh_expires_at'=>$refreshToken->expires_at,
                 'roles'          => $roles,
                 'permissions'    => $permissions,
             ]);
 
         } catch (\Throwable $e) {
-            DB::rollBack(); // annule tout en cas d'erreur
-            return $this->errorResponse('error',$e->getMessage(),500);
+            DB::rollBack();
+            return $this->errorResponse('error', $e->getMessage(), 500);
         }
     }
 

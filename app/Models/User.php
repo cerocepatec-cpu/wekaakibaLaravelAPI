@@ -45,6 +45,10 @@ class User extends Authenticatable
         'adress'
     ];
 
+    public function tokens(){
+        return $this->morphMany(PersonalAccessToken::class,'tokenable');
+    }
+
     public function getAuthIdentifierName()
     {
         return 'user_name'; // or 'email' if you prefer

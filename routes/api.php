@@ -96,6 +96,7 @@ use App\Http\Controllers\CategoriesCustomerControllerController;
 use App\Http\Controllers\CategoriesServicesControllerController;
 use App\Http\Controllers\RolePermissionController;
 use App\Http\Controllers\AuthController;
+use App\Http\Controllers\PermissionController;
 
 /*
 |--------------------------------------------------------------------------
@@ -121,6 +122,9 @@ Route::middleware('auth:sanctum')->group(function () {
     
     Route::post('user/{user}/assign-role', [RolePermissionController::class, 'assignRole']);
     Route::post('user/{user}/assign-permissions', [RolePermissionController::class, 'assignPermissions']);
+    Route::post('/assign-role', [PermissionController::class, 'assignRole']);
+    Route::post('/give-permission', [PermissionController::class, 'givePermission']);
+    Route::post('/check-permission', [PermissionController::class, 'checkPermission']);
 });
 
 /** Users getways */
