@@ -32,6 +32,7 @@ class CreateUsersTable extends Migration
             $table->boolean('mobile_access')->default(false);
             $table->boolean('can_withdraw_on_mobile')->default(false);
             $table->boolean('can_withdraw_by_agent')->default(false);
+            $table->integer('failed_attempts')->default(0);
             $table->rememberToken();
             $table->timestamps();
         });

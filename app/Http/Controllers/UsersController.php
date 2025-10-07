@@ -1673,20 +1673,18 @@ class UsersController extends Controller
      */
     public function show(User $user)
     {
-        $usersent=User::leftjoin('roles as R', 'users.permissions','=','R.id')
-        ->leftjoin('usersenterprises as E', 'users.id','=','E.user_id')
+        $usersent=User::leftjoin('usersenterprises as E', 'users.id','=','E.user_id')
         ->where('users.id','=',$user->id)
-        ->get(['users.*','R.title as role_title', 'R.description as role_description','R.permissions as role_permissions','E.enterprise_id'])->first();
+        ->get(['users.*','E.enterprise_id'])->first();
         
         return $usersent;
     } 
     
     public function showuser(User $user)
     {
-        $usersent=User::leftjoin('roles as R', 'users.permissions','=','R.id')
-        ->leftjoin('usersenterprises as E', 'users.id','=','E.user_id')
+        $usersent=User::leftjoin('usersenterprises as E', 'users.id','=','E.user_id')
         ->where('users.id','=',$user->id)
-        ->get(['users.*','R.title as role_title', 'R.description as role_description','R.permissions as role_permissions','E.enterprise_id'])->first();
+        ->get(['users.*','E.enterprise_id'])->first();
         
         if ($usersent && !empty($usersent->role_permissions)) {
             $decodedPermissions = json_decode($usersent->role_permissions, true);

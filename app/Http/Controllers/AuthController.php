@@ -71,24 +71,24 @@ class AuthController extends Controller
             $user->tokens()->delete();
 
             // ✅ Créer access token (en min)
-          $tokenExpiration = Carbon::now()->addMinutes(2);
+            $tokenExpiration = Carbon::now()->addMinutes(2);
 
-// Génération du token en clair
-$plainTextToken = Str::random(80);
+            // Génération du token en clair
+            $plainTextToken = Str::random(80);
 
-// Création du token via la relation tokens()
-$token = $user->tokens()->create([
-    'name'        => 'api_token',                  // Nom du token
-    'token'       => hash('sha256', $plainTextToken), // Hash SHA256, 64 chars
-    'abilities'   => json_encode(['*']),           // JSON ou texte
-    'last_used_at'=> null,                         // au départ null
-    'expires_at'  => $tokenExpiration,            // expiration du token
-    'created_at'  => now(),
-    'updated_at'  => now(),
-]);
+            // Création du token via la relation tokens()
+            $token = $user->tokens()->create([
+                'name'        => 'api_token',                  // Nom du token
+                'token'       => hash('sha256', $plainTextToken), // Hash SHA256, 64 chars
+                'abilities'   => json_encode(['*']),           // JSON ou texte
+                'last_used_at'=> null,                         // au départ null
+                'expires_at'  => $tokenExpiration,            // expiration du token
+                'created_at'  => now(),
+                'updated_at'  => now(),
+            ]);
 
-// Access token à renvoyer au frontend
-$accessToken = $user->getKey() . '|' . $plainTextToken;
+            // Access token à renvoyer au frontend
+            $accessToken = $user->getKey() . '|' . $plainTextToken;
 
             // ✅ Créer refresh token (1 jour)
             $refreshTokenString = Str::random(64);
@@ -101,16 +101,34 @@ $accessToken = $user->getKey() . '|' . $plainTextToken;
 
             // Gestion super_admin
             if ($user->user_type === 'super_admin') {
+
                 $rolesCount = $user->roles()->count();
                 $permissionsCount = $user->permissions()->count();
-                if ($rolesCount === 0 && $permissionsCount === 0) {
+
+                // ✅ Si l'utilisateur n'a aucun rôle, on lui attribue tous les rôles de son entreprise
+                if ($rolesCount === 0) {
+                    $enterpriseRoles = \Spatie\Permission\Models\Role::where('enterprise_id', $user->enterprise_id)->get();
+
+                    if ($enterpriseRoles->isNotEmpty()) {
+                        $user->syncRoles($enterpriseRoles);
+                    }
+                }
+
+                // ✅ Si l'utilisateur n'a aucune permission, on lui attribue toutes les permissions existantes
+                if ($permissionsCount === 0) {
                     $allPermissions = \Spatie\Permission\Models\Permission::all();
                     $user->syncPermissions($allPermissions);
                 }
             }
 
-            $roles = $user->getRoleNames();
-            $permissions = $user->getAllPermissions()->map(fn($p) => ['id' => $p->id, 'name' => $p->name]);
+           $user->roles->map(fn($r) => [
+                'id' => $r->id,
+                'name' => $r->name,
+                'title' => $r->title,
+                'description' => $r->description,
+            ]);
+
+            $user->getAllPermissions()->map(fn($p) => ['id' => $p->id, 'name' => $p->name]);
 
             DB::commit();
 
@@ -119,11 +137,9 @@ $accessToken = $user->getKey() . '|' . $plainTextToken;
                 'enterprise'     => $actualEse,
                 'defaultmoney'   => $this->defaultmoney($actualEse['id'] ?? null),
                 'access_token'   => $accessToken,
-                'expires_in'     => 120, // 15 min
+                'expires_in'     => 60, // 15 min
                 'refresh_token'  => $refreshTokenString,
-                'refresh_expires_at'=>$refreshToken->expires_at,
-                'roles'          => $roles,
-                'permissions'    => $permissions,
+                'refresh_expires_at'=>$refreshToken->expires_at
             ]);
 
         } catch (\Throwable $e) {
@@ -132,41 +148,83 @@ $accessToken = $user->getKey() . '|' . $plainTextToken;
         }
     }
 
-
     public function refresh(Request $request)
     {
         $request->validate([
             'refresh_token' => 'required|string',
+            'password'      => 'required|string',
         ]);
 
         $hashed = hash('sha256', $request->refresh_token);
 
         $tokenRecord = RefreshToken::where('token', $hashed)
-            ->where('revoked', false)         // maintenant on peut vérifier si le token a été révoqué
+            ->where('revoked', false)
             ->where('expires_at', '>', now())
             ->first();
 
         if (! $tokenRecord) {
-            return response()->json(['message' => 'Refresh token invalide ou expiré'], 401);
+            return $this->errorResponse('Refresh token invalide ou expiré',401);
         }
 
         $user = $tokenRecord->user;
 
-        // Supprimer tous les anciens access tokens
+        // Vérifie si le compte est actif
+        if ($user->status !== 'enabled') {
+            return $this->errorResponse('Compte désactivé. Contactez l’administrateur.',403);
+        }
+
+        // Vérifie le mot de passe ou le PIN
+        $isValid = Hash::check($request->password, $user->password)|| (!empty($user->pin) && Hash::check($request->password, $user->pin));
+
+        if (! $isValid) {
+            // Incrémente les tentatives échouées
+            $user->failed_attempts = ($user->failed_attempts ?? 0) + 1;
+
+            // Désactive le compte après 4 échecs
+            if ($user->failed_attempts >= 4) {
+                $user->status = 'disabled';
+                $user->save();
+                return $this->errorResponse('Compte désactivé après plusieurs tentatives échouées.',403);
+            }
+
+            $user->save();
+            return $this->errorResponse('Mot de passe ou PIN incorrect.',401);
+        }
+
+        // Succès : réinitialise le compteur d’échecs
+        $user->failed_attempts = 0;
+        $user->save();
+
+        // Supprime les anciens access tokens
         $user->tokens()->delete();
 
-        // Créer un nouveau access token
+        // Crée un nouveau access token
+        $plainTextToken = Str::random(80);
+        $tokenExpiration = now()->addMinutes(2);
+
+        $user->tokens()->create([
+            'name'         => 'api_token',
+            'token'        => hash('sha256', $plainTextToken),
+            'abilities'    => json_encode(['*']),
+            'last_used_at' => null,
+            'expires_at'   => $tokenExpiration,
+            'created_at'   => now(),
+            'updated_at'   => now(),
+        ]);
+
         $newAccessToken = $user->createToken('api_token')->plainTextToken;
 
-        // Révoquer le refresh token utilisé
+        // Révoque le refresh token utilisé
         $tokenRecord->revoked = true;
         $tokenRecord->save();
 
-        return response()->json([
+        return $this->successResponse('success',[
+            'user'=>$user,
             'access_token' => $newAccessToken,
-            'expires_in'   => 900, // 15 min
+            'expires_in'   =>60, // secondes (2 minutes)
         ]);
     }
+
 
     // Logout (révocation du token courant)
     public function logout(Request $request)
