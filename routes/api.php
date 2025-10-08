@@ -177,7 +177,10 @@ Route::get('/test_api', function () {
   
 
     return response()->json( [
-        'Content-Type' => 'application/json',
+        'status' => '200',
+        "message"=>'success',
+        "error"=>null,
+        "data"=>[]
     ]);
 });
 Route::post('/send-mail', [MailController::class, 'sendFiles']);
