@@ -173,6 +173,13 @@ Route::get('/storage/uploads/{filename}', function ($filename) {
         'Access-Control-Allow-Headers' => 'Content-Type, Authorization, X-Requested-With'
     ]);
 });
+Route::get('/test_api', function () {
+  
+
+    return response()->json( [
+        'Content-Type' => 'application/json',
+    ]);
+});
 Route::post('/send-mail', [MailController::class, 'sendFiles']);
 Route::get('/test-mail',[MailController::class, 'sendTestEmail']);
 Route::ApiResource('/users',UsersController::class);

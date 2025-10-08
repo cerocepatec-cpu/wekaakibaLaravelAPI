@@ -71,7 +71,7 @@ class AuthController extends Controller
             $user->tokens()->delete();
 
             // ✅ Créer access token (en min)
-            $tokenExpiration = Carbon::now()->addMinutes(2);
+            $tokenExpiration = Carbon::now()->addMinutes(30);
 
             // Génération du token en clair
             $plainTextToken = Str::random(80);
@@ -137,7 +137,7 @@ class AuthController extends Controller
                 'enterprise'     => $actualEse,
                 'defaultmoney'   => $this->defaultmoney($actualEse['id'] ?? null),
                 'access_token'   => $accessToken,
-                'expires_in'     => 60, // 15 min
+                'expires_in'     => 1800,
                 'refresh_token'  => $refreshTokenString,
                 'refresh_expires_at'=>$refreshToken->expires_at
             ]);
