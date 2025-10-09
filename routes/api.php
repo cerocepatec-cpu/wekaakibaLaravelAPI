@@ -1,5 +1,4 @@
 <?php
-
 use Illuminate\Http\Response;
 use Illuminate\Support\Facades\File;
 use Illuminate\Support\Facades\Route;
@@ -109,13 +108,13 @@ use App\Http\Controllers\PermissionController;
 |
 */
 Route::post('register', [AuthController::class, 'register']);
-Route::post('/refresh', [AuthController::class, 'refresh']);
 Route::post('login',    [AuthController::class, 'login']);
-Route::post('/logout', [AuthController::class, 'logout'])->middleware('auth:sanctum');
+ Route::post('/refresh', [AuthController::class, 'refresh']);
 
 Route::middleware('auth:sanctum')->group(function () {
     /** Available End-Points and Availables */
-    Route::get('me',[AuthController::class,'me']);
+    Route::post('/logout', [AuthController::class, 'logout']);
+    Route::get('/me',[AuthController::class,'me']);
     Route::get('roles', [RolePermissionController::class, 'indexRoles']);
     Route::get('permissions', [RolePermissionController::class, 'indexPermissions']);
     Route::get('users', [RolePermissionController::class, 'indexUsers']);
@@ -174,8 +173,6 @@ Route::get('/storage/uploads/{filename}', function ($filename) {
     ]);
 });
 Route::get('/test_api', function () {
-  
-
     return response()->json( [
         'status' => '200',
         "message"=>'success',

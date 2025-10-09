@@ -16,7 +16,7 @@ class Kernel extends ConsoleKernel
     protected function schedule(Schedule $schedule)
     {
         // $schedule->command('inspire')->hourly();
-        // $schedule->command('zip:clear-tokens')->hourly();
+         $schedule->command('refresh-tokens:cleanup')->daily();
          $schedule->call(function () {\App\Models\TempZip::where('expires_at', '<', now())->delete();})->daily();
     }
 
