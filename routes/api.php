@@ -124,6 +124,10 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::post('/assign-role', [PermissionController::class, 'assignRole']);
     Route::post('/give-permission', [PermissionController::class, 'givePermission']);
     Route::post('/check-permission', [PermissionController::class, 'checkPermission']);
+
+    /*** USERS END POINTS */
+    Route::ApiResource('/users',UsersController::class);
+    Route::put('/user/update-sensitive-info',[AuthController::class,'updateSensitiveInfo']);
 });
 
 /** Users getways */
@@ -182,15 +186,9 @@ Route::get('/test_api', function () {
 });
 Route::post('/send-mail', [MailController::class, 'sendFiles']);
 Route::get('/test-mail',[MailController::class, 'sendTestEmail']);
-Route::ApiResource('/users',UsersController::class);
 Route::get('/users/enterprise/{id}',[UsersController::class,'index']);
 Route::post('/users/checkagentby',[UsersController::class,'checkagentby']);
 Route::get('/searchingusers',[UsersController::class,'searchingusers']);
-Route::delete('/users/delete/{id}',[UsersController::class,'destroy2']);
-Route::patch('/users/update/{id}',[UsersController::class,'update2']);
-Route::post('/users/updatestatus',[UsersController::class,'changerStatus']);
-Route::post('/users/updatepassword',[UsersController::class,'updatePassword']);
-Route::post('/users/password/update',[UsersController::class,'updatePasswordNew']);
 Route::get('/getuser',[UsersController::class,'getone']);
 Route::get('/users/getbyid/{id}',[UsersController::class,'getuserbyId']);
 Route::post('/users/dashboard/{id}',[UsersController::class,'dashboardBasedDateOperation']);
