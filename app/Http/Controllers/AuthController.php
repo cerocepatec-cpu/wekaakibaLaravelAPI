@@ -144,6 +144,162 @@ public function resetPassword(Request $request)
 }
 
 
+    public function updateSensitiveInfo(Request $request)
+    {
+        /** @var User $user */
+        $user = Auth::user();
+        if (!$user) {
+            return $this->errorResponse('Utilisateur non authentifié', 401);
+        }
+
+        $data = $request->all();
+
+        // === VALIDATION DE BASE ===
+        $validator = Validator::make($data, [
+            'email' => 'sometimes|required|email',
+            'user_phone' => 'sometimes|required|string',
+            'old_pin' => 'sometimes|string',
+            'new_pin' => 'sometimes|string|min:4|max:6',
+            'confirm_pin' => 'sometimes|string',
+            'old_password' => 'sometimes|string',
+            'new_password' => 'sometimes|string|min:6',
+            'confirm_password' => 'sometimes|string',
+            'full_name' => 'sometimes|string|max:255',
+        ]);
+
+        if ($validator->fails()) {
+            return $this->errorResponse($validator->errors()->first(), 422);
+        }
+
+        /**
+         * ======================
+         * EMAIL
+         * ======================
+         */
+        if (!empty($data['email'])) {
+            $existing = User::where('email', $data['email'])
+                            ->where('id', '!=', $user->id)
+                            ->first();
+            if ($existing) {
+                return $this->errorResponse('Cet email appartient déjà à un autre utilisateur', 422);
+            }
+
+            if (!filter_var($data['email'], FILTER_VALIDATE_EMAIL)) {
+                return $this->errorResponse('Email invalide', 422);
+            }
+
+            $user->email = $data['email'];
+        }
+
+        /**
+         * ======================
+         * TÉLÉPHONE
+         * ======================
+         */
+        if (!empty($data['user_phone'])) {
+            $existingPhone = User::where('user_phone', $data['user_phone'])
+                                ->where('id', '!=', $user->id)
+                                ->first();
+            if ($existingPhone) {
+                return $this->errorResponse('Ce numéro de téléphone est déjà utilisé', 422);
+            }
+
+            if (!preg_match('/^\+[1-9]\d{1,14}$/', $data['user_phone'])) {
+                return $this->errorResponse('Numéro de téléphone invalide (format attendu : +243...)', 422);
+            }
+
+            $user->user_phone = $data['user_phone'];
+        }
+
+        /**
+         * ======================
+         * PIN
+         * ======================
+         */
+        if (!empty($data['old_pin']) || !empty($data['new_pin']) || !empty($data['confirm_pin'])) {
+            if (empty($data['old_pin']) || empty($data['new_pin']) || empty($data['confirm_pin'])) {
+                return $this->errorResponse('Veuillez renseigner tous les champs du PIN', 422);
+            }
+
+            if ($data['new_pin'] !== $data['confirm_pin']) {
+                return $this->errorResponse('Les nouveaux PIN ne correspondent pas', 422);
+            }
+
+            if ($user->pin !== $data['old_pin']) {
+                return $this->errorResponse('Ancien PIN incorrect', 422);
+            }
+
+            $weakPins = ['0000','1234','1111','9999',''];
+            if (in_array($data['new_pin'], $weakPins)) {
+                return $this->errorResponse('Le nouveau PIN est trop simple', 422);
+            }
+
+            $existingPin = User::where('pin', $data['new_pin'])
+                            ->where('id', '!=', $user->id)
+                            ->first();
+            if ($existingPin) {
+                return $this->errorResponse('Ce PIN est déjà utilisé par un autre utilisateur', 422);
+            }
+
+            $user->pin = $data['new_pin'];
+        }
+
+        /**
+         * ======================
+         * MOT DE PASSE
+         * ======================
+         */
+        if (!empty($data['old_password']) || !empty($data['new_password']) || !empty($data['confirm_password'])) {
+            if (empty($data['old_password']) || empty($data['new_password']) || empty($data['confirm_password'])) {
+                return $this->errorResponse('Veuillez renseigner tous les champs du mot de passe', 422);
+            }
+
+            if (!Hash::check($data['old_password'], $user->password)) {
+                return $this->errorResponse('Ancien mot de passe incorrect', 422);
+            }
+
+            if ($data['new_password'] !== $data['confirm_password']) {
+                return $this->errorResponse('Les mots de passe ne correspondent pas', 422);
+            }
+
+            // Vérifie que le nouveau mot de passe n’est pas déjà utilisé
+            $usersToCheck = User::where('id', '!=', $user->id)
+                                ->where('status', 'active')
+                                ->select('id','password')
+                                ->get();
+
+            foreach ($usersToCheck as $u) {
+                if (Hash::check($data['new_password'], $u->password)) {
+                    return $this->errorResponse('Ce mot de passe est déjà utilisé par un autre utilisateur', 422);
+                }
+            }
+
+            $user->password = Hash::make($data['new_password']);
+        }
+
+        /**
+         * ======================
+         * AUTRES CHAMPS FILLABLES
+         * ======================
+         */
+        $fillable = $user->getFillable();
+        foreach ($fillable as $field) {
+            if (in_array($field, ['email','user_phone','pin','password'])) continue;
+            if (isset($data[$field])) {
+                $user->$field = $data[$field];
+            }
+        }
+
+      if (!$user->uuid && $user->created_at) {
+            $random = substr(uniqid(), -3);
+            $user->uuid = 'GOM' . $user->created_at->format('YdmHis') . strtoupper($random);
+        }
+
+        $user->save();
+
+        return $this->successResponse('success', $user);
+    }
+
     // Register
     public function register(Request $request)
     {
