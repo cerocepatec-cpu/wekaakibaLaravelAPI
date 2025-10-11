@@ -109,7 +109,10 @@ use App\Http\Controllers\PermissionController;
 */
 Route::post('register', [AuthController::class, 'register']);
 Route::post('login',    [AuthController::class, 'login']);
- Route::post('/refresh', [AuthController::class, 'refresh']);
+Route::post('/refresh', [AuthController::class, 'refresh']);
+Route::post('/password/forgot', [AuthController::class, 'forgotPassword']);
+Route::post('/password/verify', [AuthController::class, 'verifyResetCode']);
+Route::post('/password/reset', [AuthController::class, 'resetPassword']);
 
 Route::middleware('auth:sanctum')->group(function () {
     /** Available End-Points and Availables */

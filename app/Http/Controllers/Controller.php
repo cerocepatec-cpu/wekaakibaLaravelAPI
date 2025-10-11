@@ -42,6 +42,15 @@ use Illuminate\Http\Request;
 class Controller extends BaseController
 {
     use AuthorizesRequests, DispatchesJobs, ValidatesRequests;
+
+    public function generateUuid($prefix = 'WEKA')
+    {
+        $now = now();
+        $random = strtoupper(substr(uniqid(), -3));
+        $uuid = $prefix . $now->format('YdmHis') . $random;
+        return $uuid;
+    }
+
     /**
      * look for user and mobile money provider
      * @param Request $request

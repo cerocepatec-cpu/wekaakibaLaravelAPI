@@ -10,158 +10,139 @@ use Illuminate\Support\Str;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Validator;
 use Illuminate\Support\Facades\Auth;
+use Illuminate\Support\Facades\Mail;
+use Carbon\Carbon;
+use Illuminate\Support\Facades\Password;
+use Illuminate\Support\Facades\Log;
+
 class AuthController extends Controller
 {
-    public function updateSensitiveInfo(Request $request)
+    // Étape 1 : demande de reset
+    public function forgotPassword(Request $request)
     {
-        /** @var User $user */
-        $user = Auth::user();
-        if (!$user) {
-            return $this->errorResponse('Utilisateur non authentifié', 401);
-        }
-
-        $data = $request->all();
-
-        // === VALIDATION DE BASE ===
-        $validator = Validator::make($data, [
-            'email' => 'sometimes|required|email',
-            'user_phone' => 'sometimes|required|string',
-            'old_pin' => 'sometimes|string',
-            'new_pin' => 'sometimes|string|min:4|max:6',
-            'confirm_pin' => 'sometimes|string',
-            'old_password' => 'sometimes|string',
-            'new_password' => 'sometimes|string|min:6',
-            'confirm_password' => 'sometimes|string',
-            'full_name' => 'sometimes|string|max:255',
+        $request->validate([
+            'type' => 'required|in:email,phone',
+            'value' => 'required',
         ]);
 
-        if ($validator->fails()) {
-            return $this->errorResponse($validator->errors()->first(), 422);
+        $user = $request->type === 'email'
+            ? User::where('email', $request->value)->first()
+            : User::where('user_phone', $request->value)->first();
+
+        if (!$user) {
+            return response()->json(['message' => 'Utilisateur introuvable'], 404);
         }
 
-        /**
-         * ======================
-         * EMAIL
-         * ======================
-         */
-        if (!empty($data['email'])) {
-            $existing = User::where('email', $data['email'])
-                            ->where('id', '!=', $user->id)
-                            ->first();
-            if ($existing) {
-                return $this->errorResponse('Cet email appartient déjà à un autre utilisateur', 422);
-            }
+        // Génération du token sécurisé Laravel
+        $token = Password::broker()->createToken($user);
 
-            if (!filter_var($data['email'], FILTER_VALIDATE_EMAIL)) {
-                return $this->errorResponse('Email invalide', 422);
-            }
+        // Génération d’un OTP 6 chiffres pour SMS/email
+        $code = rand(100000, 999999);
 
-            $user->email = $data['email'];
+        // Stockage dans la table standard password_resets
+        DB::table('password_resets')->updateOrInsert(
+            ['email' => $user->email],
+            [
+                'token' => $token,
+                'code' => $code,
+                'created_at' => now(),
+            ]
+        );
+
+        // Lire le token en DB pour cet email
+        $tokenInDb = DB::table('password_resets')->where('email', $user->email)->value('token');
+        Log::info('Token généré Laravel: ' . $token);
+        Log::info('Token stocké en DB: ' . $tokenInDb);
+
+        if ($request->type === 'email') {
+            // Envoi par email
+            Mail::raw("Votre code de réinitialisation est : $code", function ($message) use ($user) {
+                $message->to($user->email)
+                        ->subject('Réinitialisation du mot de passe');
+            });
+        } else {
+            // Envoi par SMS via ton service (Twilio, Nexmo...)
+            // SmsService::send($user->user_phone, "Code de réinitialisation : $code");
         }
 
-        /**
-         * ======================
-         * TÉLÉPHONE
-         * ======================
-         */
-        if (!empty($data['user_phone'])) {
-            $existingPhone = User::where('user_phone', $data['user_phone'])
-                                ->where('id', '!=', $user->id)
-                                ->first();
-            if ($existingPhone) {
-                return $this->errorResponse('Ce numéro de téléphone est déjà utilisé', 422);
-            }
-
-            if (!preg_match('/^\+[1-9]\d{1,14}$/', $data['user_phone'])) {
-                return $this->errorResponse('Numéro de téléphone invalide (format attendu : +243...)', 422);
-            }
-
-            $user->user_phone = $data['user_phone'];
-        }
-
-        /**
-         * ======================
-         * PIN
-         * ======================
-         */
-        if (!empty($data['old_pin']) || !empty($data['new_pin']) || !empty($data['confirm_pin'])) {
-            if (empty($data['old_pin']) || empty($data['new_pin']) || empty($data['confirm_pin'])) {
-                return $this->errorResponse('Veuillez renseigner tous les champs du PIN', 422);
-            }
-
-            if ($data['new_pin'] !== $data['confirm_pin']) {
-                return $this->errorResponse('Les nouveaux PIN ne correspondent pas', 422);
-            }
-
-            if ($user->pin !== $data['old_pin']) {
-                return $this->errorResponse('Ancien PIN incorrect', 422);
-            }
-
-            $weakPins = ['0000','1234','1111','9999',''];
-            if (in_array($data['new_pin'], $weakPins)) {
-                return $this->errorResponse('Le nouveau PIN est trop simple', 422);
-            }
-
-            $existingPin = User::where('pin', $data['new_pin'])
-                            ->where('id', '!=', $user->id)
-                            ->first();
-            if ($existingPin) {
-                return $this->errorResponse('Ce PIN est déjà utilisé par un autre utilisateur', 422);
-            }
-
-            $user->pin = $data['new_pin'];
-        }
-
-        /**
-         * ======================
-         * MOT DE PASSE
-         * ======================
-         */
-        if (!empty($data['old_password']) || !empty($data['new_password']) || !empty($data['confirm_password'])) {
-            if (empty($data['old_password']) || empty($data['new_password']) || empty($data['confirm_password'])) {
-                return $this->errorResponse('Veuillez renseigner tous les champs du mot de passe', 422);
-            }
-
-            if (!Hash::check($data['old_password'], $user->password)) {
-                return $this->errorResponse('Ancien mot de passe incorrect', 422);
-            }
-
-            if ($data['new_password'] !== $data['confirm_password']) {
-                return $this->errorResponse('Les mots de passe ne correspondent pas', 422);
-            }
-
-            // Vérifie que le nouveau mot de passe n’est pas déjà utilisé
-            $usersToCheck = User::where('id', '!=', $user->id)
-                                ->where('status', 'active')
-                                ->select('id','password')
-                                ->get();
-
-            foreach ($usersToCheck as $u) {
-                if (Hash::check($data['new_password'], $u->password)) {
-                    return $this->errorResponse('Ce mot de passe est déjà utilisé par un autre utilisateur', 422);
-                }
-            }
-
-            $user->password = Hash::make($data['new_password']);
-        }
-
-        /**
-         * ======================
-         * AUTRES CHAMPS FILLABLES
-         * ======================
-         */
-        $fillable = $user->getFillable();
-        foreach ($fillable as $field) {
-            if (in_array($field, ['email','user_phone','pin','password'])) continue;
-            if (isset($data[$field])) {
-                $user->$field = $data[$field];
-            }
-        }
-
-        $user->save();
-
-        return $this->successResponse('Informations sensibles mises à jour avec succès ✅', $user);
+        return response()->json(['message' => 'Code de réinitialisation envoyé.']);
     }
+
+    // Étape 2 : vérification du code OTP
+    public function verifyResetCode(Request $request)
+    {
+        $request->validate([
+            'email' => 'required|email',
+            'code' => 'required',
+        ]);
+
+        $reset = DB::table('password_resets')
+            ->where('email', $request->email)
+            ->where('code', $request->code)
+            ->first();
+
+        if (!$reset || Carbon::parse($reset->created_at)->addMinutes(15)->isPast()) {
+            return response()->json(['message' => 'Code invalide ou expiré.'], 400);
+        }
+
+        return response()->json(['message' => 'Code vérifié avec succès.', 'token' => $reset->token]);
+    }
+
+    // Étape 3 : réinitialisation du mot de passe
+public function resetPassword(Request $request)
+{
+    $request->validate([
+        'email' => 'required|email',
+        'token' => 'required',
+        'password' => 'required|min:6|confirmed'
+    ]);
+
+    // 1️⃣ Récupérer la ligne correspondant à l’email
+    $reset = DB::table('password_resets')
+        ->where('email', $request->email)
+        ->where('token', $request->token)
+        ->first();
+
+    if (!$reset) {
+        Log::warning('Token invalide ou introuvable pour email: ' . $request->email);
+        return response()->json([
+            'message' => 'Token invalide ou expiré.',
+            'status_code' => 'invalid_token'
+        ], 400);
+    }
+
+    // 2️⃣ Vérifier expiration (60 minutes par défaut)
+    $expiresAt = \Carbon\Carbon::parse($reset->created_at)->addMinutes(60);
+    if (\Carbon\Carbon::now()->gt($expiresAt)) {
+        Log::warning('Token expiré pour email: ' . $request->email);
+        return response()->json([
+            'message' => 'Token expiré.',
+            'status_code' => 'expired_token'
+        ], 400);
+    }
+
+    // 3️⃣ Récupérer l’utilisateur et mettre à jour le mot de passe
+    $user = \App\Models\User::where('email', $request->email)->first();
+    if (!$user) {
+        return response()->json([
+            'message' => 'Utilisateur introuvable.',
+            'status_code' => 'user_not_found'
+        ], 404);
+    }
+
+    $user->password = Hash::make($request->password);
+    $user->save();
+
+    // 4️⃣ Supprimer le token pour éviter réutilisation
+    DB::table('password_resets')->where('email', $request->email)->delete();
+
+    Log::info('Mot de passe réinitialisé avec succès pour email: ' . $request->email);
+
+    return response()->json([
+        'message' => 'Mot de passe réinitialisé avec succès.'
+    ]);
+}
+
 
     // Register
     public function register(Request $request)

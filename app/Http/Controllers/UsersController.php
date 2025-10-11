@@ -1514,13 +1514,14 @@ class UsersController extends Controller
     public function store(Request $request)
     {
         $request['collector']=0;
+        $request['uuid']=$this->generateUuid();
         $userS = user::create($request->all());
         if(isset($request->enterprise_id) && !empty($request->enterprise_id)){
              //affect user to the Ese
-                usersenterprise::create([
-                    'user_id'=>$userS->id,
-                    'enterprise_id'=>$request->enterprise_id
-                ]);
+            usersenterprise::create([
+                'user_id'=>$userS->id,
+                'enterprise_id'=>$request->enterprise_id
+            ]);
         }
 
         //affect user to the deposit
