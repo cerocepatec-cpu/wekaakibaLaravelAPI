@@ -14,6 +14,7 @@ use Illuminate\Support\Facades\Mail;
 use Carbon\Carbon;
 use Illuminate\Support\Facades\Password;
 use Illuminate\Support\Facades\Log;
+use App\Mail\PasswordResetSuccessMail;
 
 class AuthController extends Controller
 {
@@ -92,56 +93,118 @@ class AuthController extends Controller
 public function resetPassword(Request $request)
 {
     $request->validate([
-        'email' => 'required|email',
+        'email' => 'nullable|email',
+        'user_phone' => 'nullable|string',
         'token' => 'required',
         'password' => 'required|min:6|confirmed'
     ]);
 
-    // 1️⃣ Récupérer la ligne correspondant à l’email
-    $reset = DB::table('password_resets')
-        ->where('email', $request->email)
-        ->where('token', $request->token)
-        ->first();
+    DB::beginTransaction();
 
-    if (!$reset) {
-        Log::warning('Token invalide ou introuvable pour email: ' . $request->email);
+    try {
+        // 🔹 1️⃣ Identifier la méthode utilisée
+        $isEmailReset = !empty($request->email);
+        $isPhoneReset = !empty($request->user_phone);
+
+        if (!$isEmailReset && !$isPhoneReset) {
+            return response()->json([
+                'message' => 'Veuillez fournir un email ou un numéro de téléphone.',
+                'status_code' => 'missing_identifier'
+            ], 400);
+        }
+
+        // 🔹 2️⃣ Vérifier le token dans password_resets
+        $resetQuery = DB::table('password_resets')
+            ->where('token', $request->token);
+
+        if ($isEmailReset) {
+            $resetQuery->where('email', $request->email);
+        } else {
+            $resetQuery->where('user_phone', $request->user_phone);
+        }
+
+        $reset = $resetQuery->first();
+
+        if (!$reset) {
+            Log::warning('Token invalide ou introuvable pour identifiant: ' . ($request->email ?? $request->user_phone));
+            DB::rollBack();
+            return response()->json([
+                'message' => 'Token invalide ou expiré.',
+                'status_code' => 'invalid_token'
+            ], 400);
+        }
+
+        // 🔹 3️⃣ Vérifier expiration (60 minutes)
+        $expiresAt = \Carbon\Carbon::parse($reset->created_at)->addMinutes(60);
+        if (\Carbon\Carbon::now()->gt($expiresAt)) {
+            Log::warning('Token expiré pour identifiant: ' . ($request->email ?? $request->user_phone));
+            DB::rollBack();
+            return response()->json([
+                'message' => 'Token expiré.',
+                'status_code' => 'expired_token'
+            ], 400);
+        }
+
+        // 🔹 4️⃣ Récupérer l’utilisateur
+        $userQuery = \App\Models\User::query();
+        if ($isEmailReset) {
+            $userQuery->where('email', $request->email);
+        } else {
+            $userQuery->where('user_phone', $request->user_phone);
+        }
+
+        $user = $userQuery->first();
+
+        if (!$user) {
+            DB::rollBack();
+            return response()->json([
+                'message' => 'Utilisateur introuvable.',
+                'status_code' => 'user_not_found'
+            ], 404);
+        }
+
+        // 🔹 5️⃣ Mettre à jour le mot de passe
+        $user->password = Hash::make($request->password);
+        $user->save();
+
+        // 🔹 6️⃣ Supprimer le token utilisé
+        DB::table('password_resets')
+            ->where($isEmailReset ? 'email' : 'user_phone', $isEmailReset ? $request->email : $request->user_phone)
+            ->delete();
+
+        Log::info('Mot de passe réinitialisé avec succès pour ' . ($request->email ?? $request->user_phone));
+
+        // 🔹 7️⃣ Notification selon le mode de réinitialisation
+        if ($isEmailReset && $user->email) {
+            Mail::to($user->email)->send(new PasswordResetSuccessMail($user));
+            Log::info("Email de notification envoyé à: {$user->email}");
+        } elseif ($isPhoneReset && $user->user_phone) {
+            $smsText = "Bonjour, votre mot de passe a été réinitialisé avec succès. Si ce n'est pas vous, contactez le support immédiatement.";
+            Log::info("SMS à {$user->user_phone}: {$smsText}");
+
+            // Exemple Twilio :
+            // Twilio::messages()->create($user->user_phone, [
+            //     'from' => env('TWILIO_NUMBER'),
+            //     'body' => $smsText
+            // ]);
+        }
+
+        DB::commit();
+
         return response()->json([
-            'message' => 'Token invalide ou expiré.',
-            'status_code' => 'invalid_token'
-        ], 400);
-    }
+            'message' => 'Mot de passe réinitialisé avec succès.'
+        ]);
 
-    // 2️⃣ Vérifier expiration (60 minutes par défaut)
-    $expiresAt = \Carbon\Carbon::parse($reset->created_at)->addMinutes(60);
-    if (\Carbon\Carbon::now()->gt($expiresAt)) {
-        Log::warning('Token expiré pour email: ' . $request->email);
+    } catch (\Exception $e) {
+        DB::rollBack();
+        Log::error('Erreur lors de la réinitialisation du mot de passe: ' . $e->getMessage());
         return response()->json([
-            'message' => 'Token expiré.',
-            'status_code' => 'expired_token'
-        ], 400);
+            'message' => 'Échec de la réinitialisation du mot de passe.',
+            'error' => $e->getMessage()
+        ], 500);
     }
-
-    // 3️⃣ Récupérer l’utilisateur et mettre à jour le mot de passe
-    $user = \App\Models\User::where('email', $request->email)->first();
-    if (!$user) {
-        return response()->json([
-            'message' => 'Utilisateur introuvable.',
-            'status_code' => 'user_not_found'
-        ], 404);
-    }
-
-    $user->password = Hash::make($request->password);
-    $user->save();
-
-    // 4️⃣ Supprimer le token pour éviter réutilisation
-    DB::table('password_resets')->where('email', $request->email)->delete();
-
-    Log::info('Mot de passe réinitialisé avec succès pour email: ' . $request->email);
-
-    return response()->json([
-        'message' => 'Mot de passe réinitialisé avec succès.'
-    ]);
 }
+
 
 
     public function updateSensitiveInfo(Request $request)
