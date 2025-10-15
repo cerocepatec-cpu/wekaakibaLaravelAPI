@@ -118,6 +118,7 @@ Route::middleware('auth:sanctum')->group(function () {
     /** Available End-Points and Availables */
     Route::post('/logout', [AuthController::class, 'logout']);
     Route::get('/me',[AuthController::class,'me']);
+    Route::put('/resetpin',[AuthController::class,'resetPin']);
     Route::get('roles', [RolePermissionController::class, 'indexRoles']);
     Route::get('permissions', [RolePermissionController::class, 'indexPermissions']);
     Route::get('users', [RolePermissionController::class, 'indexUsers']);

@@ -7,21 +7,15 @@ use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Foundation\Auth\User as Authenticatable;
 use Illuminate\Notifications\Notifiable;
 use Laravel\Sanctum\HasApiTokens;
-use App\Models\MobileMoneyProviders;
 use Spatie\Permission\Traits\HasRoles;
-
-// use Laravel\Sanctum\HasApiTokens;
-//use Laravel\Passport\HasApiTokens;
+use App\Models\MobileMoneyProviders;
 
 class User extends Authenticatable implements CanResetPassword
 {
-    use  HasFactory, HasApiTokens;
-    use Notifiable;
-    use HasRoles;
+    use HasFactory, HasApiTokens, Notifiable, HasRoles;
+
     /**
-     * The attributes that are mass assignable.
-     *
-     * @var array<int, string>
+     * Champs remplissables
      */
     protected $fillable = [
         'user_name',
@@ -42,28 +36,79 @@ class User extends Authenticatable implements CanResetPassword
         'mobile_access',
         'can_withdraw_on_mobile',
         'can_withdraw_by_agent',
-        'adress'
+        'adress',
     ];
 
-    public function tokens(){
-        return $this->morphMany(PersonalAccessToken::class,'tokenable');
+    /**
+     * Champs cachés à la sérialisation
+     */
+    protected $hidden = [
+        'password',
+        'remember_token',
+        'email_verified_at',
+        'laravel_through_key',
+        'pin',
+    ];
+
+    /**
+     * Casts
+     */
+    protected $casts = [
+        'email_verified_at' => 'datetime',
+    ];
+
+    /**
+     * Attributs calculés ajoutés automatiquement à JSON
+     */
+    protected $appends = ['pin_set', 'weak_pin'];
+
+    // =====================================================
+    // 🔐 ATTRIBUTS DÉRIVÉS : DÉTECTION DU PIN
+    // =====================================================
+
+    /**
+     * Indique si l’utilisateur a un PIN configuré
+     */
+    public function getPinSetAttribute(): bool
+    {
+        $pin = $this->attributes['pin'] ?? null;
+
+        // Un hash bcrypt fait généralement 60 caractères
+        // Si c’est vide ou trop court, PIN non configuré
+        return !empty($pin) && strlen($pin) > 20;
     }
 
-    public function getAuthIdentifierName()
+    /**
+     * Indique si le PIN est potentiellement faible
+     */
+    public function getWeakPinAttribute(): bool
     {
-        return 'user_name'; // or 'email' if you prefer
+        $pin = $this->attributes['pin'] ?? null;
+
+        // Si pas de PIN, pas de faiblesse à signaler
+        if (empty($pin)) {
+            return false;
+        }
+
+        // Si le PIN semble stocké en clair (ex: "0000" ou "1234")
+        // → la longueur du champ est trop courte pour un hash bcrypt
+        return strlen($pin) < 30;
     }
-    
-    public function getEmailForPasswordReset()
+
+    // =====================================================
+    // 🔗 RELATIONS
+    // =====================================================
+
+    public function tokens()
     {
-        return $this->email;
+        return $this->morphMany(PersonalAccessToken::class, 'tokenable');
     }
 
     public function usersenterprise()
     {
         return $this->hasMany(UsersEnterprise::class, 'user_id', 'id');
     }
-    
+
     public function mobileMoneyProviders()
     {
         return $this->belongsToMany(MobileMoneyProviders::class, 'users_mobile_money_providers')
@@ -81,12 +126,13 @@ class User extends Authenticatable implements CanResetPassword
             ->first();
     }
 
-    public static function getUserBy($keyword,$criteria)
+    public static function getUserBy($keyword, $criteria)
     {
-        return self::where($criteria,$keyword)->first();
+        return self::where($criteria, $keyword)->first();
     }
 
-    public function requests(){
+    public function requests()
+    {
         return $this->hasMany(requests::class);
     }
 
@@ -94,7 +140,7 @@ class User extends Authenticatable implements CanResetPassword
     {
         return self::where(function ($query) use ($login) {
                 $query->where('user_name', $login)
-                    ->orWhere('user_mail', $login);
+                      ->orWhere('user_mail', $login);
             })
             ->where('status', 'enabled')
             ->first();
@@ -108,25 +154,17 @@ class User extends Authenticatable implements CanResetPassword
         return collect($this->attributesToArray())->only($selectedFields);
     }
 
+    // =====================================================
+    // ⚙️ MÉTHODES AUTH
+    // =====================================================
 
-    /**
-     * The attributes that should be hidden for serialization.
-     *
-     * @var array<int, string>
-     */
-    protected $hidden = [
-        'password',
-        'remember_token',
-        'email_verified_at',
-        'laravel_through_key',
-    ];
+    public function getAuthIdentifierName()
+    {
+        return 'user_name';
+    }
 
-    /**
-     * The attributes that should be cast.
-     *
-     * @var array<string, string>
-     */
-    protected $casts = [
-        'email_verified_at' => 'datetime',
-    ];
+    public function getEmailForPasswordReset()
+    {
+        return $this->email;
+    }
 }

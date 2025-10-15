@@ -107,7 +107,7 @@ class Controller extends BaseController
         ]);
     } 
     
-    public function successResponse($message, $data,$code = 200)
+    public function successResponse($message='success', $data,$code = 200)
     {
         return response()->json([
             "status" => $code,

@@ -31,6 +31,7 @@ use App\Models\customerspointshistory;
 use App\Models\wekaAccountsTransactions;
 use App\Services\MailService;
 use Illuminate\Support\Str;
+use Illuminate\Support\Facades\Hash;
 
 class UsersController extends Controller
 {
@@ -1511,64 +1512,90 @@ class UsersController extends Controller
      * @param  \Illuminate\Http\Request  $request
      * @return \Illuminate\Http\Response
      */
-    public function store(Request $request)
-    {
-        $request['collector']=0;
-        $request['uuid']=$this->generateUuid();
-        $userS = user::create($request->all());
-        if(isset($request->enterprise_id) && !empty($request->enterprise_id)){
-             //affect user to the Ese
-            usersenterprise::create([
-                'user_id'=>$userS->id,
-                'enterprise_id'=>$request->enterprise_id
+
+public function store(Request $request)
+{
+    // === valeurs par défaut si non envoyées ou vides ===
+    $defaultPin = '1234';
+    $defaultPassword = '0123456789';
+
+    // Si la clé 'pin' n'existe pas ou est vide, on lui donne la valeur par défaut
+    if (!isset($request['pin']) || empty($request['pin'])) {
+        $request['pin'] = $defaultPin;
+    }
+
+    // Si la clé 'password' n'existe pas ou est vide, on lui donne la valeur par défaut
+    if (!isset($request['password']) || empty($request['password'])) {
+        $request['password'] = $defaultPassword;
+    }
+
+    // === Hashage du PIN et du mot de passe ===
+    // On ne stocke jamais en clair : on remplace les valeurs par leurs hash bcrypt
+    $request['pin'] = Hash::make($request['pin']);
+    $request['password'] = Hash::make($request['password']);
+
+    // === autres champs par défaut / génération UUID ===
+    $request['collector'] = 0;
+    $request['uuid'] = $this->generateUuid();
+
+    // Création de l'utilisateur (avec pin et password déjà hachés)
+    $userS = User::create($request->all());
+
+    // Affectation à l'entreprise si fournie
+    if (isset($request->enterprise_id) && !empty($request->enterprise_id)) {
+         usersenterprise::create([
+            'user_id' => $userS->id,
+            'enterprise_id' => $request->enterprise_id
+        ]);
+    }
+
+    // Affectation au dépôt si fourni
+    if (isset($request['deposit_id']) && !empty($request['deposit_id'])) {
+        $deposit = DepositController::find($request['deposit_id']);
+        if ($deposit) {
+            DepositsUsers::create([
+                'deposit_id' => $deposit['id'],
+                'user_id' => $userS['id'],
+                'level' => 'simple'
             ]);
         }
+    }
 
-        //affect user to the deposit
-        if(isset($request['deposit_id']) && !empty($request['deposit_id'])){
-            $deposit=DepositController::find($request['deposit_id']);
-            if ($deposit) {
-                DepositsUsers::create([
-                    'deposit_id'=>$deposit['id'],
-                    'user_id'=>$userS['id'],
-                    'level'=>'simple'
-                ]);
-            }
-        }
+    $userSave = $this->show(User::find($userS['id']));
 
-        $userSave=$this->show(User::find($userS['id']));
+    // Gestion des niveaux / affectation aux départements
+    if (isset($request->level) && isset($request->department_id)) {
+        // verification si il existe un utilisateur de type chief déjà affecté
+        if ($request->level == 'chief') {
 
-        if(isset($request->level) && isset($request->department_id)){
-            // verification si il existe un utilisatair de type admin deja affecter
-            if ($request->level == 'chief') {
-
-                $ifIsChief = DB::table('affectation_users')
-                ->where('department_id','=', $request->department_id)
+            $ifIsChief = DB::table('affectation_users')
+                ->where('department_id', '=', $request->department_id)
                 ->where('level', '=', 'chief')
                 ->get();
 
-                if (count($ifIsChief) == 0) {
-                    $departemetAffect = affectation_users::create(
-                        ['user_id' => $userS['id'],
-                        'level' => $request->level,
-                        'department_id' => $request->department_id,
-                    ]);
-                    return [$userSave, $affected = 'succes'];
-                }else {
-                    return [$userSave, $affected ='error'];
-                }
-            }else{
-                $departemetAffect = affectation_users::create(
-                    ['user_id' => $userS['id'],
+            if (count($ifIsChief) == 0) {
+                $departemetAffect = affectation_users::create([
+                    'user_id' => $userS['id'],
                     'level' => $request->level,
                     'department_id' => $request->department_id,
                 ]);
-                return [$userSave=$this->show(User::find($userS['id'])), $affected = 'succes'];
+                return [$userSave, $affected = 'succes'];
+            } else {
+                return [$userSave, $affected = 'error'];
             }
-        }else{
-            return $userSave;
+        } else {
+            $departemetAffect = affectation_users::create([
+                'user_id' => $userS['id'],
+                'level' => $request->level,
+                'department_id' => $request->department_id,
+            ]);
+            return [$this->show(User::find($userS['id'])), $affected = 'succes'];
         }
+    } else {
+        return $userSave;
     }
+}
+
 
     /**
      * Adding new member in the DB
