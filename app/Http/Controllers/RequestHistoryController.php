@@ -199,6 +199,8 @@ class RequestHistoryController extends Controller
 
         try {
             $request['done_at'] = date('Y-m-d');
+            $user = auth()->user();
+            $request['enterprise_id'] = $this->getEse($user->id)['id'];
 
             switch ($request->nature) {
                 case 'transfert':
@@ -214,7 +216,6 @@ class RequestHistoryController extends Controller
                     break;
 
                 default:
-                // Fallback : garder la logique actuelle "entry/withdraw"
                 $newvalue = $this->handleClassicOperation($request);
                 break;
             }
@@ -372,7 +373,7 @@ class RequestHistoryController extends Controller
             'is_validate'    => false,
             'uuid'           => $this->getUuId('E', 'EX'),
             'done_at'        => $request->done_at,
-            'beneficiary'    => $request->beneficiary ?? 'N/A',
+            'beneficiary'    => $request->beneficiary ?? null,
             'enterprise_id'  => $request->enterprise_id,
             'status'         => 'pending'
         ]);
