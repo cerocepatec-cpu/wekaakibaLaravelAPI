@@ -146,6 +146,12 @@ Route::middleware(['auth:sanctum'])->group(function () {
     Route::post('/funds/requesthistories',[FundsController::class,'requesthistoriesbyagent']);
     Route::get('/money/enterprise/{id}',[MoneysController::class,'index']);
     Route::get('/request_history/byfund/{fund}',[RequestHistoryController::class,'getbyfund']);
+    Route::get('/weka/searchaccountsbyenterprise',[WekamemberaccountsController::class,'searchaccountsbyenterprise']);
+    Route::post('/weka/usersbytypes/enterprise',[UsersController::class,'usersbytypes']);
+    Route::get('/weka/allaccounts/{id}',[WekamemberaccountsController::class,'allaccounts']);
+    Route::post('/weka/members/lookup',[UsersController::class,'wekamemberslookup']);
+    Route::get('/weka/account/transactions',[WekaAccountsTransactionsController::class,'getTransactionsByAccount']);
+    Route::post('/funds/savemultiples',[RequestHistoryController::class,'savemultiple']);
 });
 
 
@@ -272,7 +278,6 @@ Route::get('/clear-laravel-cache', function () {
 // 
 // Route::get('/searchingrequesthistories',[RequestHistoryController::class,'searchingrequesthistories']);
 // Route::get('/funds/getOperationById/{id}',[RequestHistoryController::class,'getOperationById']);
-// Route::post('/funds/savemultiples',[RequestHistoryController::class,'savemultiple']);
 // Route::post('/funds/operations/update',[RequestHistoryController::class,'operationsupdate']);
 
 // Route::resource('/money_conversion', MoneyConversionController::class);
@@ -827,8 +832,6 @@ Route::get('/clear-laravel-cache', function () {
 //  * API WEKA AKIBA END-POINTS
 //  */
 // Route::post('/weka/users/changeaccess/',[UsersController::class,'changeaccess']);
-// Route::get('/weka/allaccounts/{id}',[WekamemberaccountsController::class,'allaccounts']);
-// Route::get('/weka/searchaccountsbyenterprise',[WekamemberaccountsController::class,'searchaccountsbyenterprise']);
 // Route::put('/weka/membersaccount/update/{id}',[WekamemberaccountsController::class,'update']);
 // Route::get('/weka/member/accounts/{id}',[WekamemberaccountsController::class,'membersaccounts']);
 // Route::post('/weka/newaccount',[WekamemberaccountsController::class,'store']);
@@ -839,7 +842,6 @@ Route::get('/clear-laravel-cache', function () {
 // Route::post('/weka/removesponsoring',[UsersController::class,'removesponsoring']);
 // Route::get('/weka/memberspaginated/{enterpriseid}',[UsersController::class,'wekamemberslistpaginated']);
 // Route::get('/weka/members-to-validated/enterprise/{id}',[UsersController::class,'wekamemberstovalidate']);
-// Route::post('/weka/members/lookup',[UsersController::class,'wekamemberslookup']);
 // Route::post('/weka/member/updatecollectionpercentage',[UsersController::class,'updatecollectionpercentage']);
 // Route::post('/weka/accounts/newtranfert',[WekatransfertsaccountsController::class,'store']);
 // Route::get('/weka/account/transferts/history',[WekatransfertsaccountsController::class,'getTransfersList']);
@@ -850,7 +852,6 @@ Route::get('/clear-laravel-cache', function () {
 // Route::post('/weka/transactions/syncing',[WekaAccountsTransactionsController::class,'syncing']);
 // Route::post('/weka/transactions',[WekaAccountsTransactionsController::class,'index']);
 // Route::get('/weka/transactionspaginated',[WekaAccountsTransactionsController::class,'getTransactionslistByUser']);
-// Route::get('/weka/account/transactions',[WekaAccountsTransactionsController::class,'getTransactionsByAccount']);
 // Route::get('/weka/transactionsbyspecificmember',[WekaAccountsTransactionsController::class,'transactionsHistoryforSpecificMember']);
 // Route::post('/weka/mobile-dashboard',[WekaAccountsTransactionsController::class,'dashboardmobileatwekaakiba']);
 // Route::post('/weka/transactions/update',[WekaAccountsTransactionsController::class,'updatetransactions']);
@@ -864,7 +865,6 @@ Route::get('/clear-laravel-cache', function () {
 // Route::post('/weka/firstentries/delete',[WekafirstentriesController::class,'destroy']);
 // Route::post('/weka/firstentries/update',[WekafirstentriesController::class,'update']);
 // Route::post('/weka/members-validation',[UsersController::class,'members_validation']);
-// Route::post('/weka/usersbytypes/enterprise',[UsersController::class,'usersbytypes']);
 // Route::post('/users/membertocollectors',[UsersController::class,'membertocollectors']);
 // Route::post('/weka/groups',[WekagroupsController::class,'index']);
 // Route::post('/weka/groupswithmembers',[WekagroupsController::class,'groupandmembers']);

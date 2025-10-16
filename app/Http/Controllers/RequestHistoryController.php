@@ -221,7 +221,7 @@ class RequestHistoryController extends Controller
             }
 
             DB::commit();
-            return $this->successResponse('success',$this->show($newvalue));
+            return $this->successResponse('success',$newvalue);
 
         } catch (\Exception $e) {
             DB::rollBack();
@@ -321,14 +321,15 @@ class RequestHistoryController extends Controller
             'amount'            => $request->amount,
             'sold_before'       => $sold_before,
             'sold_after'        => $sold_before + $request->amount,
-            'type'              => 'credit',
+            'type'              => 'deposit',
             'motif'             => "Approvisionnement depuis la caisse {$fund->name}",
             'user_id'           => $request->user_id,
             'member_account_id' => $account->id,
             'enterprise_id'     => $request->enterprise_id,
             'done_at'           => $request->done_at,
             'uuid'              => $this->getUuId('A', 'AP'),
-            'transaction_status'=> 'completed'
+            'transaction_status'=> 'validated',
+            'member_id'=>$account->user_id
         ]);
 
         return $withdraw;
@@ -421,124 +422,8 @@ class RequestHistoryController extends Controller
 
         // Créer l'enregistrement dans request_history
         $record = requestHistory::create($data);
-
-        return $this->successResponse("success", $record);
+        return $record;
     }
-
-
-    // public function store(StorerequestHistoryRequest $request)
-    // {
-    //     DB::beginTransaction();
-
-    //     try {
-    //         $request['done_at']=date('Y-m-d');
-    //         if ($request->type == 'entry') {
-    //             $fund = funds::find($request->fund_id);
-    //             $request['sold'] = $fund->sold + $request->amount;
-
-    //             $newvalue = requestHistory::create($request->all());
-    //             DB::update('UPDATE funds SET sold = sold + ? WHERE id = ?', [$request->amount, $request->fund_id]);
-
-    //             // Stock fournisseur
-    //             if ($request['provider_id'] && $request['service_id'] && $request['amount_provided']) {
-    //                 $provider = ProviderController::find($request['provider_id']);
-    //                 $service = ServicesController::find($request['service_id']);
-
-    //                 StockHistoryController::create([
-    //                     'provider_id'     => $request['provider_id'],
-    //                     'service_id'      => $request['service_id'],
-    //                     'user_id'         => $request['user_id'],
-    //                     'quantity'        => $request['quantity_provided'] ?: 1,
-    //                     'price'           => $request['quantity_provided'] ? ($request['amount_provided'] / $request['quantity_provided']) : $request['amount_provided'],
-    //                     'type'            => 'entry',
-    //                     'type_approvement'=> 'credit',
-    //                     'enterprise_id'   => $request['enterprise_id'],
-    //                     'motif'           => $request['motif'] ?? 'Location '.$service->name.' auprès du fournisseur '.$provider->providerName,
-    //                     'done_at'         => $request['done_at'],
-    //                     'date_operation'  => $request['done_at'],
-    //                     'uuid'            => $this->getUuId('C','ST'),
-    //                     'depot_id'        => $this->defaultdeposit($request['enterprise_id'])['id'],
-    //                     'quantity_before' => 0,
-    //                     'total'           => $request['amount_provided'] ?? $request['amount'],
-    //                     'requesthistory_id' => $newvalue->id
-    //                 ]);
-    //             }
-
-    //             // Pièces jointes
-    //             if (!empty($request['attachments'])) {
-    //                 foreach ($request['attachments'] as $key => $attachment) {
-    //                     $libraryfind = libraries::find($attachment['id']);
-    //                     if ($libraryfind) {
-    //                         images::create([
-    //                             'doc_link'      => $libraryfind['id'],
-    //                             'description'   => $newvalue['motif'],
-    //                             'type_operation'=> 'request_history',
-    //                             'ref_operation' => $newvalue['id'],
-    //                             'done_by'       => $request['user_id'],
-    //                             'enterprise_id' => $request['enterprise_id'],
-    //                             'size'          => $libraryfind['size'],
-    //                             'principal'     => $key == 0
-    //                         ]);
-    //                     }
-    //                 }
-    //             }
-
-    //             DB::commit();
-    //             return $this->show($newvalue);
-    //         } else {
-    //             // ===> WITHDRAW LOGIC
-    //             $gettingsold = funds::find($request->fund_id);
-    //             $sold = $gettingsold['sold'];
-
-    //             if ($sold >= $request->amount) {
-    //                 $request['sold'] = $sold - $request->amount;
-    //                 $newvalue = requestHistory::create($request->all());
-    //                 DB::update('UPDATE funds SET sold = sold - ? WHERE id = ?', [$request->amount, $request->fund_id]);
-
-    //                 // Paiement aux fournisseurs (si applicable)
-    //                 if ($request['provider_id']) {
-    //                     $this->makingproviderpayments($request);
-    //                 }
-
-    //                 // Pièces jointes
-    //                 if (!empty($request['attachments'])) {
-    //                     foreach ($request['attachments'] as $key => $attachment) {
-    //                         $libraryfind = libraries::find($attachment['id']);
-    //                         if ($libraryfind) {
-    //                             images::create([
-    //                                 'doc_link'      => $libraryfind['id'],
-    //                                 'description'   => $newvalue['motif'],
-    //                                 'type_operation'=> 'request_history',
-    //                                 'ref_operation' => $newvalue['id'],
-    //                                 'done_by'       => $request['user_id'],
-    //                                 'enterprise_id' => $request['enterprise_id'],
-    //                                 'size'          => $libraryfind['size'],
-    //                                 'principal'     => $key == 0
-    //                             ]);
-    //                         }
-    //                     }
-    //                 }
-
-    //                 DB::commit();
-    //                 return $this->show($newvalue);
-    //             } else {
-    //                 DB::rollBack();
-    //                 return response()->json([
-    //                     'message' => 'error',
-    //                     'error'   => 'Le solde du fond est insuffisant pour effectuer ce retrait.',
-    //                     'data'    => null
-    //                 ], 422);
-    //             }
-    //         }
-    //     } catch (\Exception $e) {
-    //         DB::rollBack();
-    //         return response()->json([
-    //             'message' => 'error',
-    //             'error'   => $e->getMessage()
-    //         ], 500);
-    //     }
-    // }
-
 
     private function makingnewstockhistoryforprovider($request){
 
@@ -610,38 +495,56 @@ class RequestHistoryController extends Controller
     /**
      * save multiples
      */
-    public function savemultiple(Request $request){
-        $data=[];
-        // return $request;
-        if ($request->data && count($request->data)>0) {
-            try {
-                foreach ($request->data as  $item) {
-                    array_push($data,$this->store(new StorerequestHistoryRequest($item)));
-                }
+    public function savemultiple(Request $request)
+    {
+        $data = [];
 
+        if ($request->data && count($request->data) > 0) {
+            try {
+                foreach ($request->data as $item) {
+                    $response = $this->store(new StorerequestHistoryRequest($item));
+                    if ($response instanceof \Illuminate\Http\JsonResponse) {
+                        $decoded = $response->getData(true);
+
+                        if (isset($decoded['data'])) {
+                            $saved = $decoded['data'];
+                            if (isset($saved['id'])) {
+                                $showResponse = $this->show(requestHistory::find($saved['id']));
+
+                                if ($showResponse instanceof \Illuminate\Http\JsonResponse) {
+                                    $showDecoded = $showResponse->getData(true);
+                                    if (isset($showDecoded['data'])) {
+                                        $data[] = $showDecoded['data'];
+                                    }
+                                } else {
+                                    $data[] = $showResponse;
+                                }
+                            }
+                        }
+                    }
+                }
                 return response()->json([
-                    "status"=>200,
-                    "message"=>"success",
-                    "error"=>null,
-                    "data"=>$data
+                    "status" => 200,
+                    "message" => "success",
+                    "error" => null,
+                    "data" => $data
                 ]);
-            } catch (Exception $th) {
+            } catch (\Exception $th) {
                 return response()->json([
-                    "status"=>500,
-                    "message"=>"error occured",
-                    "error"=>$th->getMessage(),
-                    "data"=>null
+                    "status" => 500,
+                    "message" => "error occured",
+                    "error" => $th->getMessage(),
+                    "data" => null
                 ]);
             }
-          
-        }else{
-            return response()->json([
-                "status"=>500,
-                "message"=>"error occured",
-                "error"=>"no data sent",
-                "data"=>null
-            ]);
         }
+
+        return response()->json([
+            "status" => 500,
+            "message" => "error occured",
+            "error" => "no data sent",
+            "data" => null
+        ]);
     }
 
     /**
