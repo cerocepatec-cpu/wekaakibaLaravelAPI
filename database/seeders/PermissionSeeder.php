@@ -268,6 +268,8 @@ class PermissionSeeder extends Seeder
             'caisses.withdraw',
             'caisses.report',
             'caisses.can_be_affected',
+            'caisses.can_make_transfert',
+            'caisses.can_see_history',
 
             // Entreprises
             'entreprise.all',

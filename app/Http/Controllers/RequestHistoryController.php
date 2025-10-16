@@ -8,12 +8,15 @@ use App\Models\requestHistory;
 use Illuminate\Support\Facades\DB;
 use App\Http\Requests\StorerequestHistoryRequest;
 use App\Http\Requests\UpdaterequestHistoryRequest;
+use App\Models\Expenditures;
 use App\Models\images;
 use App\Models\libraries;
 use App\Models\ProviderController;
 use App\Models\providerspayments;
 use App\Models\ServicesController;
 use App\Models\StockHistoryController;
+use App\Models\wekaAccountsTransactions;
+use App\Models\wekamemberaccounts;
 use Exception;
 use Illuminate\Http\Request;
 
@@ -190,246 +193,351 @@ class RequestHistoryController extends Controller
      * @param  \App\Http\Requests\StorerequestHistoryRequest  $request
      * @return \Illuminate\Http\Response
      */
-    public function store(StorerequestHistoryRequest $request)
+   public function store(StorerequestHistoryRequest $request)
     {
         DB::beginTransaction();
 
         try {
-            if ($request->type == 'entry') {
-                $fund = funds::find($request->fund_id);
-                $request['sold'] = $fund->sold + $request->amount;
+            $request['done_at'] = date('Y-m-d');
 
-                $newvalue = requestHistory::create($request->all());
-                DB::update('UPDATE funds SET sold = sold + ? WHERE id = ?', [$request->amount, $request->fund_id]);
+            switch ($request->nature) {
+                case 'transfert':
+                    $newvalue = $this->handleTransfer($request);
+                    break;
 
-                // Stock fournisseur
-                if ($request['provider_id'] && $request['service_id'] && $request['amount_provided']) {
-                    $provider = ProviderController::find($request['provider_id']);
-                    $service = ServicesController::find($request['service_id']);
+                case 'approvment':
+                    $newvalue = $this->handleApprovment($request);
+                    break;
 
-                    StockHistoryController::create([
-                        'provider_id'     => $request['provider_id'],
-                        'service_id'      => $request['service_id'],
-                        'user_id'         => $request['user_id'],
-                        'quantity'        => $request['quantity_provided'] ?: 1,
-                        'price'           => $request['quantity_provided'] ? ($request['amount_provided'] / $request['quantity_provided']) : $request['amount_provided'],
-                        'type'            => 'entry',
-                        'type_approvement'=> 'credit',
-                        'enterprise_id'   => $request['enterprise_id'],
-                        'motif'           => $request['motif'] ?? 'Location '.$service->name.' auprès du fournisseur '.$provider->providerName,
-                        'done_at'         => $request['done_at'],
-                        'date_operation'  => $request['done_at'],
-                        'uuid'            => $this->getUuId('C','ST'),
-                        'depot_id'        => $this->defaultdeposit($request['enterprise_id'])['id'],
-                        'quantity_before' => 0,
-                        'total'           => $request['amount_provided'] ?? $request['amount'],
-                        'requesthistory_id' => $newvalue->id
-                    ]);
-                }
+                case 'expenditure':
+                    $newvalue = $this->handleExpenditure($request);
+                    break;
 
-                // Pièces jointes
-                if (!empty($request['attachments'])) {
-                    foreach ($request['attachments'] as $key => $attachment) {
-                        $libraryfind = libraries::find($attachment['id']);
-                        if ($libraryfind) {
-                            images::create([
-                                'doc_link'      => $libraryfind['id'],
-                                'description'   => $newvalue['motif'],
-                                'type_operation'=> 'request_history',
-                                'ref_operation' => $newvalue['id'],
-                                'done_by'       => $request['user_id'],
-                                'enterprise_id' => $request['enterprise_id'],
-                                'size'          => $libraryfind['size'],
-                                'principal'     => $key == 0
-                            ]);
-                        }
-                    }
-                }
-
-                DB::commit();
-                return $this->show($newvalue);
-            } else {
-                // ===> WITHDRAW LOGIC
-                $gettingsold = funds::find($request->fund_id);
-                $sold = $gettingsold['sold'];
-
-                if ($sold >= $request->amount) {
-                    $request['sold'] = $sold - $request->amount;
-                    $newvalue = requestHistory::create($request->all());
-                    DB::update('UPDATE funds SET sold = sold - ? WHERE id = ?', [$request->amount, $request->fund_id]);
-
-                    // Paiement aux fournisseurs (si applicable)
-                    if ($request['provider_id']) {
-                        $this->makingproviderpayments($request);
-                    }
-
-                    // Pièces jointes
-                    if (!empty($request['attachments'])) {
-                        foreach ($request['attachments'] as $key => $attachment) {
-                            $libraryfind = libraries::find($attachment['id']);
-                            if ($libraryfind) {
-                                images::create([
-                                    'doc_link'      => $libraryfind['id'],
-                                    'description'   => $newvalue['motif'],
-                                    'type_operation'=> 'request_history',
-                                    'ref_operation' => $newvalue['id'],
-                                    'done_by'       => $request['user_id'],
-                                    'enterprise_id' => $request['enterprise_id'],
-                                    'size'          => $libraryfind['size'],
-                                    'principal'     => $key == 0
-                                ]);
-                            }
-                        }
-                    }
-
-                    DB::commit();
-                    return $this->show($newvalue);
-                } else {
-                    DB::rollBack();
-                    return response()->json([
-                        'message' => 'error',
-                        'error'   => 'Le solde du fond est insuffisant pour effectuer ce retrait.',
-                        'data'    => null
-                    ], 422);
-                }
+                default:
+                // Fallback : garder la logique actuelle "entry/withdraw"
+                $newvalue = $this->handleClassicOperation($request);
+                break;
             }
+
+            DB::commit();
+            return $this->show($newvalue);
+
         } catch (\Exception $e) {
             DB::rollBack();
-            return response()->json([
-                'message' => 'error',
-                'error'   => $e->getMessage()
-            ], 500);
+            return $this->errorResponse($e->getMessage(), 500);
         }
     }
 
+
+    private function handleTransfer($request)
+    {
+        $fundSender = funds::find($request->fund_id);
+        $fundReceiver = funds::find($request->fund_receiver_id);
+
+        if (!$fundSender || !$fundReceiver) {
+            throw new \Exception("L'une des caisses sélectionnées n'existe pas.");
+        }
+
+        if ($fundSender->sold < $request->amount) {
+            throw new \Exception("Solde insuffisant dans la caisse source.");
+        }
+
+        // Retrait (withdraw)
+        $withdraw = requestHistory::create([
+            'user_id'        => $request->user_id,
+            'fund_id'        => $fundSender->id,
+            'amount'         => $request->amount,
+            'motif'          => "Transfert vers {$fundReceiver->name}",
+            'type'           => 'withdraw',
+            'enterprise_id'  => $request->enterprise_id,
+            'sold'           => $fundSender->sold - $request->amount,
+            'done_at'        => $request->done_at,
+            'uuid'           => $this->getUuId('R', 'TR'),
+            'fund_receiver_id' => $fundReceiver->id,
+            'nature'         => 'transfert'
+        ]);
+
+        // Mise à jour sold
+        $fundSender->update(['sold' => $fundSender->sold - $request->amount]);
+
+        // Entrée (entry)
+        $entry = requestHistory::create([
+            'user_id'        => $request->user_id,
+            'fund_id'        => $fundReceiver->id,
+            'amount'         => $request->amount,
+            'motif'          => "Transfert reçu de {$fundSender->name}",
+            'type'           => 'entry',
+            'enterprise_id'  => $request->enterprise_id,
+            'sold'           => $fundReceiver->sold + $request->amount,
+            'done_at'        => $request->done_at,
+            'uuid'           => $this->getUuId('E', 'TR'),
+            'fund_receiver_id' => $fundReceiver->id,
+            'nature'         => 'transfert'
+        ]);
+
+        $fundReceiver->update(['sold' => $fundReceiver->sold + $request->amount]);
+
+        return $entry;
+    }
+
+
+   private function handleApprovment($request)
+    {
+        $fund = funds::find($request->fund_id);
+        $account = wekamemberaccounts::find($request->member_account_id);
+
+        if (!$fund || !$account) {
+            throw new \Exception("Caisse ou compte membre introuvable.");
+        }
+
+        if ($fund->sold < $request->amount) {
+            throw new \Exception("Solde insuffisant pour l’approvisionnement.");
+        }
+
+        // Sortie dans la caisse
+        $withdraw = requestHistory::create([
+            'user_id'       => $request->user_id,
+            'fund_id'       => $fund->id,
+            'amount'        => $request->amount,
+            'motif'         => "Approvisionnement du compte membre #{$account->account_number}",
+            'type'          => 'withdraw',
+            'enterprise_id' => $request->enterprise_id,
+            'sold'          => $fund->sold - $request->amount,
+            'done_at'       => $request->done_at,
+            'uuid'          => $this->getUuId('W', 'AP'),
+            'member_account_id' => $account->id,
+            'nature'        => 'approvment'
+        ]);
+
+        $fund->update(['sold' => $fund->sold - $request->amount]);
+
+        // Mise à jour du compte membre
+        $sold_before = $account->sold;
+        $account->update(['sold' => $sold_before + $request->amount]);
+
+        // Enregistrement dans WekaAccountsTransactions
+        wekaAccountsTransactions::create([
+            'amount'            => $request->amount,
+            'sold_before'       => $sold_before,
+            'sold_after'        => $sold_before + $request->amount,
+            'type'              => 'credit',
+            'motif'             => "Approvisionnement depuis la caisse {$fund->name}",
+            'user_id'           => $request->user_id,
+            'member_account_id' => $account->id,
+            'enterprise_id'     => $request->enterprise_id,
+            'done_at'           => $request->done_at,
+            'uuid'              => $this->getUuId('A', 'AP'),
+            'transaction_status'=> 'completed'
+        ]);
+
+        return $withdraw;
+    }
+
+    private function handleExpenditure($request)
+    {
+        $fund = funds::find($request->fund_id);
+        if (!$fund) {
+            throw new \Exception("Caisse introuvable pour la dépense.");
+        }
+
+        if ($fund->sold < $request->amount) {
+            throw new \Exception("Solde insuffisant pour la dépense.");
+        }
+
+        // Retrait (withdraw)
+        $withdraw = requestHistory::create([
+            'user_id'       => $request->user_id,
+            'fund_id'       => $fund->id,
+            'amount'        => $request->amount,
+            'motif'         => $request->motif,
+            'type'          => 'withdraw',
+            'enterprise_id' => $request->enterprise_id,
+            'sold'          => $fund->sold - $request->amount,
+            'done_at'       => $request->done_at,
+            'uuid'          => $this->getUuId('W', 'EX'),
+            'nature'        => 'expenditure',
+            'beneficiary'   => $request->beneficiary ?? 'N/A'
+        ]);
+
+        $fund->update(['sold' => $fund->sold - $request->amount]);
+
+        // Enregistrement de la dépense
+        Expenditures::create([
+            'user_id'        => $request->user_id,
+            'money_id'       => $fund->money_id,
+            'ticket_office_id'=> $fund->id,
+            'amount'         => $request->amount,
+            'motif'          => $request->motif,
+            'account_id'     => $request->account_id ?? null,
+            'is_validate'    => false,
+            'uuid'           => $this->getUuId('E', 'EX'),
+            'done_at'        => $request->done_at,
+            'beneficiary'    => $request->beneficiary ?? 'N/A',
+            'enterprise_id'  => $request->enterprise_id,
+            'status'         => 'pending'
+        ]);
+
+        return $withdraw;
+    }
+
+   private function handleClassicOperation($request)
+    {
+        // si $request est un FormRequest / Request, on récupère les données
+        $data = is_array($request) ? $request : $request->all();
+
+        // Vérifier présence du fund_id
+        if (empty($data['fund_id'])) {
+            return $this->errorResponse("Identifiant de la caisse (fund_id) manquant.", 422);
+        }
+
+        $fund = funds::find($data['fund_id']);
+        if (!$fund) {
+            return $this->errorResponse("La caisse spécifiée est introuvable.", 404);
+        }
+
+        // Normaliser le montant
+        $amount = floatval($data['amount'] ?? 0);
+        if ($amount <= 0) {
+            return $this->errorResponse("Montant invalide.", 422);
+        }
+
+        // Traitement selon le type
+        if (($data['type'] ?? '') === 'entry') {
+            // entrée : incrémenter le sold
+            $fund->increment('sold', $amount);
+        } else {
+            // sortie : vérifier solde puis décrémenter
+            if ($fund->sold < $amount) {
+                return $this->errorResponse("Solde insuffisant pour ce retrait.", 422);
+            }
+            $fund->decrement('sold', $amount);
+        }
+
+        // Rafraîchir le modèle pour obtenir le sold à jour
+        $fund->refresh();
+        $data['sold'] = $fund->sold;
+        $data['done_at'] = $data['done_at'] ?? now()->toDateString();
+
+        // Créer l'enregistrement dans request_history
+        $record = requestHistory::create($data);
+
+        return $this->successResponse("success", $record);
+    }
+
+
     // public function store(StorerequestHistoryRequest $request)
     // {
-    //     if($request->type=='entry'){
-    //         $fund=funds::find($request->fund_id);
-    //         $request['sold']=$fund->sold+$request->amount;
-    //         $newvalue=requestHistory::create($request->all());
-    //         DB::update('update funds set sold =sold + ? where id = ? ',[$request->amount,$request->fund_id]);
-    //         if ($request['provider_id'] && $request['service_id'] && $request['amount_provided']) {
-    //             $provider=ProviderController::find($request['provider_id']);
-    //             $service=ServicesController::find($request['service_id']);
-    //             StockHistoryController::create([
-    //                 'provider_id'=>$request['provider_id'],
-    //                 'service_id'=>$request['service_id'],
-    //                 'user_id'=>$request['user_id'],
-    //                 'quantity'=>$request['quantity_provided']?$request['quantity_provided']:1,
-    //                 'price'=>$request['quantity_provided']?($request['amount_provided']/$request['quantity_provided']):$request['amount_provided'],
-    //                 'type'=>'entry',
-    //                 'type_approvement'=>'credit',
-    //                 'enterprise_id'=>$request['enterprise_id'],
-    //                 'motif'=>$request['motif']?$request['motif']:'Location '.$service->name.' auprès du fournisseur '.$provider->providerName,
-    //                 'done_at'=>$request['done_at'],
-    //                 'date_operation'=>$request['done_at'],
-    //                 'uuid'=>$this->getUuId('C','ST'),
-    //                 'depot_id'=>$this->defaultdeposit($request['enterprise_id'])['id'],
-    //                 'quantity_before'=>0,
-    //                 'total'=>$request['amount_provided']?$request['amount_provided']:$request['amount'],
-    //                 'requesthistory_id'=>$newvalue->id
-    //             ]);
-    //         }
+    //     DB::beginTransaction();
 
-    //         if ($request['attachments'] && count($request['attachments'])>0) {
-    //             foreach ($request['attachments'] as $key => $attachment) {
-    //                 $libraryfind=libraries::find($attachment['id']);
-    //                 if ($libraryfind) {
-    //                     $newimage=images::create([
-    //                         'doc_link'=>$libraryfind['id'],
-    //                         'description'=>$newvalue['motif'],
-    //                         'type_operation'=>'request_history',
-    //                         'ref_operation'=>$newvalue['id'],
-    //                         'done_by'=>$request['user_id'],
-    //                         'enterprise_id'=>$request['enterprise_id'],
-    //                         'size'=>$libraryfind['size'],
-    //                         'principal'=>$key==0?true:false
-    //                     ]);
-    //                 }
+    //     try {
+    //         $request['done_at']=date('Y-m-d');
+    //         if ($request->type == 'entry') {
+    //             $fund = funds::find($request->fund_id);
+    //             $request['sold'] = $fund->sold + $request->amount;
+
+    //             $newvalue = requestHistory::create($request->all());
+    //             DB::update('UPDATE funds SET sold = sold + ? WHERE id = ?', [$request->amount, $request->fund_id]);
+
+    //             // Stock fournisseur
+    //             if ($request['provider_id'] && $request['service_id'] && $request['amount_provided']) {
+    //                 $provider = ProviderController::find($request['provider_id']);
+    //                 $service = ServicesController::find($request['service_id']);
+
+    //                 StockHistoryController::create([
+    //                     'provider_id'     => $request['provider_id'],
+    //                     'service_id'      => $request['service_id'],
+    //                     'user_id'         => $request['user_id'],
+    //                     'quantity'        => $request['quantity_provided'] ?: 1,
+    //                     'price'           => $request['quantity_provided'] ? ($request['amount_provided'] / $request['quantity_provided']) : $request['amount_provided'],
+    //                     'type'            => 'entry',
+    //                     'type_approvement'=> 'credit',
+    //                     'enterprise_id'   => $request['enterprise_id'],
+    //                     'motif'           => $request['motif'] ?? 'Location '.$service->name.' auprès du fournisseur '.$provider->providerName,
+    //                     'done_at'         => $request['done_at'],
+    //                     'date_operation'  => $request['done_at'],
+    //                     'uuid'            => $this->getUuId('C','ST'),
+    //                     'depot_id'        => $this->defaultdeposit($request['enterprise_id'])['id'],
+    //                     'quantity_before' => 0,
+    //                     'total'           => $request['amount_provided'] ?? $request['amount'],
+    //                     'requesthistory_id' => $newvalue->id
+    //                 ]);
     //             }
-    //         }
-    //         return  $this->show($newvalue);
-    //     }else{
-    //         //checking sold
-    //         $gettingsold=funds::find($request->fund_id);
-    //         $sold=$gettingsold['sold'];
 
-    //         if($sold>=$request->amount){
-    //             $request['sold']=$sold-$request->amount;
-    //             $newvalue=requestHistory::create($request->all());
-    //             DB::update('update funds set sold =sold - ? where id = ? ',[$request->amount,$request->fund_id]);
-    //             $operationdone=$this->show($newvalue);
-    //             //payments to do
-    //             if ($request['provider_id']) {
-    //                 $amountSent=$request['amount'];
-    //                 //select all his debts
-    //                 $stockhistories=collect(StockHistoryController::leftjoin('providerspayments as P','stock_history_controllers.id','=','P.stock_history_id')
-    //                 ->select(DB::raw('stock_history_controllers.id as stock_history'),DB::raw('sum(P.amount) as totalpayed'),DB::raw('sum(stock_history_controllers.total) as totaldebts'))
-    //                 ->where('stock_history_controllers.type','entry')
-    //                 ->where('stock_history_controllers.provider_id',$request['provider_id'])
-    //                 ->where('stock_history_controllers.type_approvement','credit')
-    //                 ->groupByRaw('stock_history_controllers.id')
-    //                 ->havingRaw('totaldebts > totalpayed')
-    //                 ->orHavingRaw('totalpayed IS NULL')
-    //                 ->orderBy('stock_history_controllers.done_at','ASC')->get());
-    //                 while ($amountSent > 0) {
-    //                     foreach ($stockhistories as  $stock) {
-    //                         $amountToPaye=0;
-    //                         $soldDebt=($stock->totaldebts)-($stock->totalpayed?$stock->totalpayed:0);
-    //                         if ($soldDebt>=$amountSent) {
-    //                             $amountToPaye=$amountSent;
-    //                         }
-                            
-    //                         if ($soldDebt<$amountSent) {
-    //                             $amountToPaye=$soldDebt;   
-    //                         }
-    
-    //                         $newrequest=new StoreproviderspaymentsRequest([
-    //                             'done_by'=>$request['user_id'],
-    //                             'provider_id'=>$request['provider_id'],
-    //                             'stock_history_id'=>$stock['stock_history'],
-    //                             'enterprise_id'=>$request['enterprise_id'],
-    //                             'status'=>'pending',
-    //                             'note'=>$request['motif'],
-    //                             'amount'=>$amountToPaye,
-    //                             'uuid'=>$this->getUuId('C','PP'),
-    //                             'done_at'=>$request['done_at']
-    //                         ]);
-    //                         providerspayments::create($newrequest->all());
-    //                         $amountSent=$amountSent-$amountToPaye;
-    //                     }
-    //                 }
-    //             } 
-    //             if ($request['attachments'] && count($request['attachments'])>0) {
+    //             // Pièces jointes
+    //             if (!empty($request['attachments'])) {
     //                 foreach ($request['attachments'] as $key => $attachment) {
-    //                     $libraryfind=libraries::find($attachment['id']);
+    //                     $libraryfind = libraries::find($attachment['id']);
     //                     if ($libraryfind) {
-    //                         $newimage=images::create([
-    //                             'doc_link'=>$libraryfind['id'],
-    //                             'description'=>$newvalue['motif'],
-    //                             'type_operation'=>'request_history',
-    //                             'ref_operation'=>$newvalue['id'],
-    //                             'done_by'=>$request['user_id'],
-    //                             'enterprise_id'=>$request['enterprise_id'],
-    //                             'size'=>$libraryfind['size'],
-    //                             'principal'=>$key==0?true:false
+    //                         images::create([
+    //                             'doc_link'      => $libraryfind['id'],
+    //                             'description'   => $newvalue['motif'],
+    //                             'type_operation'=> 'request_history',
+    //                             'ref_operation' => $newvalue['id'],
+    //                             'done_by'       => $request['user_id'],
+    //                             'enterprise_id' => $request['enterprise_id'],
+    //                             'size'          => $libraryfind['size'],
+    //                             'principal'     => $key == 0
     //                         ]);
     //                     }
     //                 }
     //             }
-    //             // $operationdone['stockhistories']=$stockhistories;
-    //             return  $operationdone;
+
+    //             DB::commit();
+    //             return $this->show($newvalue);
+    //         } else {
+    //             // ===> WITHDRAW LOGIC
+    //             $gettingsold = funds::find($request->fund_id);
+    //             $sold = $gettingsold['sold'];
+
+    //             if ($sold >= $request->amount) {
+    //                 $request['sold'] = $sold - $request->amount;
+    //                 $newvalue = requestHistory::create($request->all());
+    //                 DB::update('UPDATE funds SET sold = sold - ? WHERE id = ?', [$request->amount, $request->fund_id]);
+
+    //                 // Paiement aux fournisseurs (si applicable)
+    //                 if ($request['provider_id']) {
+    //                     $this->makingproviderpayments($request);
+    //                 }
+
+    //                 // Pièces jointes
+    //                 if (!empty($request['attachments'])) {
+    //                     foreach ($request['attachments'] as $key => $attachment) {
+    //                         $libraryfind = libraries::find($attachment['id']);
+    //                         if ($libraryfind) {
+    //                             images::create([
+    //                                 'doc_link'      => $libraryfind['id'],
+    //                                 'description'   => $newvalue['motif'],
+    //                                 'type_operation'=> 'request_history',
+    //                                 'ref_operation' => $newvalue['id'],
+    //                                 'done_by'       => $request['user_id'],
+    //                                 'enterprise_id' => $request['enterprise_id'],
+    //                                 'size'          => $libraryfind['size'],
+    //                                 'principal'     => $key == 0
+    //                             ]);
+    //                         }
+    //                     }
+    //                 }
+
+    //                 DB::commit();
+    //                 return $this->show($newvalue);
+    //             } else {
+    //                 DB::rollBack();
+    //                 return response()->json([
+    //                     'message' => 'error',
+    //                     'error'   => 'Le solde du fond est insuffisant pour effectuer ce retrait.',
+    //                     'data'    => null
+    //                 ], 422);
+    //             }
     //         }
-    //         else{
-    //             return response()->json([
-    //                 "message"=>"error",
-    //                 "error"=>"no type operation",
-    //                 "data"=>null
-    //             ]);
-    //         }
+    //     } catch (\Exception $e) {
+    //         DB::rollBack();
+    //         return response()->json([
+    //             'message' => 'error',
+    //             'error'   => $e->getMessage()
+    //         ], 500);
     //     }
     // }
+
 
     private function makingnewstockhistoryforprovider($request){
 

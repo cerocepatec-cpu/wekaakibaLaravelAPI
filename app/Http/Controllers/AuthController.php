@@ -15,9 +15,65 @@ use Carbon\Carbon;
 use Illuminate\Support\Facades\Password;
 use Illuminate\Support\Facades\Log;
 use App\Mail\PasswordResetSuccessMail;
+use Illuminate\Support\Facades\Cache;
 
 class AuthController extends Controller
 {
+     // Configurable
+    protected int $maxAttempts = 5;
+    protected int $lockoutSeconds = 15 * 60; // 15 minutes
+
+    public function verifyPin(Request $request)
+    {
+        $request->validate([
+            'pin' => 'required|string|size:4',
+        ]);
+
+        $user = $request->user();
+        if (!$user) {
+            return $this->errorResponse('Utilisateur non authentifié', 401);
+        }
+
+        // Vérification si compte déjà bloqué
+        if ($user->status === 'disabled') {
+            return $this->errorResponse('Compte désactivé. Veuillez contacter l’administrateur.', 403);
+        }
+
+        // Vérification du PIN (hashé)
+        if (Hash::check($request->pin, $user->pin)) {
+            // PIN correct → reset failed_attempts
+            $user->failed_attempts = 0;
+            $user->pin_locked_until = null;
+            $user->save();
+
+            return $this->successResponse('success',$user);
+        }
+
+        // PIN incorrect → incrémente failed_attempts
+        $user->failed_attempts++;
+
+        if ($user->failed_attempts >= $this->maxAttempts) {
+            // Bloquer le compte
+            $user->status = 'disabled';
+            $user->pin_locked_until = now()->addSeconds($this->lockoutSeconds); // optionnel
+        }
+
+        $user->save();
+
+        // Message pour le front
+        $remaining = max(0, $this->maxAttempts - $user->failed_attempts);
+        $message = $user->status === 'disabled'
+            ? "PIN incorrect. Compte temporairement désactivé pour {$this->lockoutSeconds} secondes."
+            : "PIN incorrect. Il vous reste {$remaining} tentative(s).";
+
+        return $this->errorResponse($message, 403);
+    }
+
+    protected function getCacheKey($userId): string
+    {
+        return "pin_attempts_user_{$userId}";
+    }
+
     public function resetPin(Request $request)
     {
         $request->validate([
@@ -136,14 +192,14 @@ class AuthController extends Controller
             ->first();
 
         if (!$reset || Carbon::parse($reset->created_at)->addMinutes(15)->isPast()) {
-            return response()->json(['message' => 'Code invalide ou expiré.'], 400);
+            return $this->errorResponse('Code invalide ou expiré',400);
         }
 
-        return response()->json(['message' => 'Code vérifié avec succès.', 'token' => $reset->token]);
+        return $this->successResponse('success',['token' => $reset->token]);
     }
 
     // Étape 3 : réinitialisation du mot de passe
-    public function resetPassword(Request $request)
+  public function resetPassword(Request $request)
     {
         $request->validate([
             'email' => 'nullable|email',
@@ -160,10 +216,7 @@ class AuthController extends Controller
             $isPhoneReset = !empty($request->user_phone);
 
             if (!$isEmailReset && !$isPhoneReset) {
-                return response()->json([
-                    'message' => 'Veuillez fournir un email ou un numéro de téléphone.',
-                    'status_code' => 'missing_identifier'
-                ], 400);
+                return $this->errorResponse("Veuillez fournir un email ou un numéro de téléphone.", 400);
             }
 
             // 🔹 2️⃣ Vérifier le token dans password_resets
@@ -181,10 +234,7 @@ class AuthController extends Controller
             if (!$reset) {
                 Log::warning('Token invalide ou introuvable pour identifiant: ' . ($request->email ?? $request->user_phone));
                 DB::rollBack();
-                return response()->json([
-                    'message' => 'Token invalide ou expiré.',
-                    'status_code' => 'invalid_token'
-                ], 400);
+                return $this->errorResponse("Token invalide ou expiré.", 400);
             }
 
             // 🔹 3️⃣ Vérifier expiration (60 minutes)
@@ -192,10 +242,7 @@ class AuthController extends Controller
             if (\Carbon\Carbon::now()->gt($expiresAt)) {
                 Log::warning('Token expiré pour identifiant: ' . ($request->email ?? $request->user_phone));
                 DB::rollBack();
-                return response()->json([
-                    'message' => 'Token expiré.',
-                    'status_code' => 'expired_token'
-                ], 400);
+                return $this->errorResponse("Token expiré.", 400);
             }
 
             // 🔹 4️⃣ Récupérer l’utilisateur
@@ -210,10 +257,7 @@ class AuthController extends Controller
 
             if (!$user) {
                 DB::rollBack();
-                return response()->json([
-                    'message' => 'Utilisateur introuvable.',
-                    'status_code' => 'user_not_found'
-                ], 404);
+                return $this->errorResponse("Utilisateur introuvable.", 404);
             }
 
             // 🔹 5️⃣ Mettre à jour le mot de passe
@@ -243,22 +287,14 @@ class AuthController extends Controller
             }
 
             DB::commit();
-
-            return response()->json([
-                'message' => 'Mot de passe réinitialisé avec succès.'
-            ]);
+            return $this->successResponse("Mot de passe réinitialisé avec succès.", null);
 
         } catch (\Exception $e) {
             DB::rollBack();
             Log::error('Erreur lors de la réinitialisation du mot de passe: ' . $e->getMessage());
-            return response()->json([
-                'message' => 'Échec de la réinitialisation du mot de passe.',
-                'error' => $e->getMessage()
-            ], 500);
+            return $this->errorResponse("Échec de la réinitialisation du mot de passe. " . $e->getMessage(), 500);
         }
     }
-
-
 
     public function updateSensitiveInfo(Request $request)
     {
@@ -597,7 +633,8 @@ class AuthController extends Controller
         return $this->successResponse('success', [
             'user'          => $user,
             'access_token'  => $plainTextToken,
-            'expires_in'    =>3600 // 10 minutes
+            'expires_in'    =>3600 ,// 10 minutes
+            'token_created_at'=>$token->accessToken->created_at
         ]);
     }
 

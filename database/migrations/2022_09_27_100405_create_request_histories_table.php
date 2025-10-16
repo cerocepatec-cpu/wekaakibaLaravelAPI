@@ -28,11 +28,17 @@ class CreateRequestHistoriesTable extends Migration
             $table->foreign('fund_id')->references('id')->on('funds')->onDelete('cascade');
             $table->bigInteger('enterprise_id')->unsigned();
             $table->foreign('enterprise_id')->references('id')->on('enterprises')->onDelete('cascade');
+            $table->double('sold')->nullable();
             $table->date('done_at')->nullable();
             $table->integer('account_id')->nullable();
+            $table->integer('notebook_id')->nullable();
             $table->string('beneficiary')->nullable();
             $table->string('provenance')->nullable();
             $table->string('uuid')->nullable();
+            $table->foreignId('fund_receiver_id')->nullable()->constrained('funds')->nullOnDelete();
+            $table->foreignId('expenditure_id')->nullable()->constrained('expenditures')->nullOnDelete();
+            $table->foreignId('member_account_id')->nullable()->constrained('wekamemberaccounts')->nullOnDelete();
+            $table->enum('nature', ['transfert', 'approvment', 'expenditure', 'other'])->default('other');
             $table->timestamps();
         });
     }

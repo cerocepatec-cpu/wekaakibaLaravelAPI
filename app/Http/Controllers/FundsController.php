@@ -21,12 +21,24 @@ class FundsController extends Controller
      *
      * @return \Illuminate\Http\Response
      */
-    public function index()
+    public function index($enterprise)
     {
-        $list= funds::leftjoin('users as U', 'funds.user_id','=','U.id')
-        ->leftjoin('moneys as M', 'funds.money_id','=','M.id')
-        ->get(['M.abreviation as money_abreviation', 'U.user_name', 'funds.*']);
-        return $list;
+        try {
+            $list = Funds::where('enterprise_id', $enterprise)->get();
+
+            if ($list->isEmpty()) {
+                return $this->errorResponse('Aucune caisse trouvée pour cette entreprise', 404);
+            }
+
+            $formattedList = $list->map(function ($fund) {
+                return $this->show($fund) ?? null;
+            })->filter();
+
+            return $this->successResponse('success', $formattedList);
+
+        } catch (\Exception $e) {
+            return $this->errorResponse('Erreur lors du chargement des caisses : '.$e->getMessage(), 500);
+        }
     }
 
     public function mines($user){

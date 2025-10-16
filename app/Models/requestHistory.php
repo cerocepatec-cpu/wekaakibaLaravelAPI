@@ -25,6 +25,11 @@ class requestHistory extends Model
         'status',
         'beneficiary',
         'provenance',
-        'uuid'
+        'uuid',
+        'fund_receiver_id',
+        'expenditure_id',
+        'member_account_id',
+        'nature',
     ];
+
 }
