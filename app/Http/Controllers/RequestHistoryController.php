@@ -221,7 +221,7 @@ class RequestHistoryController extends Controller
             }
 
             DB::commit();
-            return $this->show($newvalue);
+            return $this->successResponse('success',$this->show($newvalue));
 
         } catch (\Exception $e) {
             DB::rollBack();
