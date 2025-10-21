@@ -29,6 +29,7 @@ class wekaAccountsTransactions extends Model
     'adresse',
     'imputed_to',	
 	'imputed_at',	
-	'imputed_by'
+	'imputed_by',
+    'fund_id'
     ];
 }

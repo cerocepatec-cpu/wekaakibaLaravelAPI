@@ -152,6 +152,8 @@ Route::middleware(['auth:sanctum'])->group(function () {
     Route::post('/weka/members/lookup',[UsersController::class,'wekamemberslookup']);
     Route::get('/weka/account/transactions',[WekaAccountsTransactionsController::class,'getTransactionsByAccount']);
     Route::post('/funds/savemultiples',[RequestHistoryController::class,'savemultiple']);
+    Route::post('/expenditures/doneby',[ExpendituresController::class,'doneby']);
+    Route::post('/weka/transactions/new',[WekaAccountsTransactionsController::class,'store']);
 });
 
 
@@ -617,7 +619,6 @@ Route::get('/clear-laravel-cache', function () {
 // Route::post('/accounts/importation',[AccountsController::class,'importation']);
 
 // Route::apiResource('expenditures',ExpendituresController::class);
-// Route::post('/expenditures/doneby',[ExpendituresController::class,'doneby']);
 // Route::get('/expenditures/getexpenditurebyid/{id}',[ExpendituresController::class,'getexpenditurebyid']);
 // Route::get('/searchexpendituresdoneby',[ExpendituresController::class,'searchdoneby']);
 // Route::post('/expenditures/byaccount',[ExpendituresController::class,'byaccount']);
@@ -846,7 +847,6 @@ Route::get('/clear-laravel-cache', function () {
 // Route::post('/weka/accounts/newtranfert',[WekatransfertsaccountsController::class,'store']);
 // Route::get('/weka/account/transferts/history',[WekatransfertsaccountsController::class,'getTransfersList']);
 // Route::post('/weka/financedashboard/{userid}' ,[UsersController::class,'wekafinancedashboard']);
-// Route::post('/weka/transactions/new',[WekaAccountsTransactionsController::class,'store']);
 // Route::post('/weka/pendingWithdrawalAccountTransaction/new',[WekaAccountsTransactionsController::class,'pendingWithdrawalAccountTransaction']);
 // Route::put('/weka/transactions/{wekaAccountsTransactions}', [WekaAccountsTransactionsController::class, 'update']);
 // Route::post('/weka/transactions/syncing',[WekaAccountsTransactionsController::class,'syncing']);

@@ -47,7 +47,7 @@ class wekamemberaccounts extends Model
     
     public function isavailable(): bool
     {
-        if ($this->type==='blocked' || $this->account_status === 'disabled') {
+        if ($this->account_status === 'disabled') {
             return false;
         }else{
             return true;
