@@ -65,4 +65,11 @@ class funds extends Model
             ->where('fund_status', 'enabled')
             ->first();
     }
+
+    public static function myFundWithMoney($moneyId,$userId){
+         return self::where('user_id', $userId)
+        ->where('money_id', $moneyId)
+        ->where('fund_status', 'enabled')
+        ->first();
+    }
 }

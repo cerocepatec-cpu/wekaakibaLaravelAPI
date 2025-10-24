@@ -131,6 +131,7 @@ Route::middleware(['auth:sanctum'])->group(function () {
     Route::middleware(['check.security'])->group(function () {
         Route::resource('/request_history',RequestHistoryController::class);
         Route::post('/request_history/new',[RequestHistoryController::class,'store']);
+        Route::post('/weka/transactions/new',[WekaAccountsTransactionsController::class,'store']);
     });
 
     /** Permissions et roles sensibles mais peut rester sans PIN */
@@ -153,7 +154,7 @@ Route::middleware(['auth:sanctum'])->group(function () {
     Route::get('/weka/account/transactions',[WekaAccountsTransactionsController::class,'getTransactionsByAccount']);
     Route::post('/funds/savemultiples',[RequestHistoryController::class,'savemultiple']);
     Route::post('/expenditures/doneby',[ExpendituresController::class,'doneby']);
-    Route::post('/weka/transactions/new',[WekaAccountsTransactionsController::class,'store']);
+    Route::get('/weka/transactionspaginated',[WekaAccountsTransactionsController::class,'getTransactionslistByUser']);
 });
 
 
@@ -851,7 +852,6 @@ Route::get('/clear-laravel-cache', function () {
 // Route::put('/weka/transactions/{wekaAccountsTransactions}', [WekaAccountsTransactionsController::class, 'update']);
 // Route::post('/weka/transactions/syncing',[WekaAccountsTransactionsController::class,'syncing']);
 // Route::post('/weka/transactions',[WekaAccountsTransactionsController::class,'index']);
-// Route::get('/weka/transactionspaginated',[WekaAccountsTransactionsController::class,'getTransactionslistByUser']);
 // Route::get('/weka/transactionsbyspecificmember',[WekaAccountsTransactionsController::class,'transactionsHistoryforSpecificMember']);
 // Route::post('/weka/mobile-dashboard',[WekaAccountsTransactionsController::class,'dashboardmobileatwekaakiba']);
 // Route::post('/weka/transactions/update',[WekaAccountsTransactionsController::class,'updatetransactions']);

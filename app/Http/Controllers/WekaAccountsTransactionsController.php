@@ -19,6 +19,7 @@ use Illuminate\Support\Facades\DB;
 use App\Exports\TransactionsExport;
 use App\Http\Controllers\Controller;
 use App\Models\MobileMoneyProviders;
+use Illuminate\Support\Facades\Auth;
 use Maatwebsite\Excel\Facades\Excel;
 use App\Models\wekaAccountsTransactions;
 use App\Http\Requests\StorerequestHistoryRequest;
@@ -933,69 +934,83 @@ class WekaAccountsTransactionsController extends Controller
      * @param  \App\Http\Requests\StorewekaAccountsTransactionsRequest  $request
      * @return \Illuminate\Http\Response
      */
-   public function store(StorewekaAccountsTransactionsRequest $request)
-{
-    try {
-        // 🔹 1. Identification sécurisée de l'utilisateur connecté via le token
-        $user = $request->user(); // Utilisateur connecté via Sanctum
-        if (!$user) {
-            return $this->errorResponse("Utilisateur non authentifié", 401);
-        }
+    public function store(StorewekaAccountsTransactionsRequest $request)
+    {
+        try {
+            $user = $request->user();
+            if (!$user) {
+                return $this->errorResponse("Utilisateur non authentifié", 401);
+            }
 
-        // 🔹 2. Préparation des variables
-        $accountId =$request['member_account_id'] ?? null;
-        $type = $request['type'] ?? null;
-        $amount = $request['amount'] ?? 0;
-        $motif = $request['motif'] ?? '';
-        $fundId = $request['fund_id'] ?? 0;
+            $accountId =$request['member_account_id'] ?? null;
+            $type = $request['type'] ?? null;
+            $amount = $request['amount'] ?? 0;
+            $motif = $request['motif'] ?? '';
+            $fundId = $request['fund_id'] ?? 0;
+            $nature = $request['nature'] ?? null;
 
-        // 🔹 3. Conditions générales (inspirées du frontend Angular)
-        if (!$accountId || $accountId <= 0) {
-            return $this->errorResponse("Vous devez sélectionner un compte à " . ($type === 'deposit' ? 'débiter' : 'créditer'));
-        }
+            if (!$type) {
+                return $this->errorResponse("Vous devez envoyer un type.");
+            } 
+            
+            if (!$nature) {
+                return $this->errorResponse("Vous devez envoyer une nature.");
+            }
+            
+            if (!$accountId || $accountId <= 0) {
+                return $this->errorResponse("Vous devez sélectionner un compte à " . ($type === 'deposit' ? 'débiter' : 'créditer'));
+            }
 
-        if ($amount <= 0) {
-            return $this->errorResponse("Le montant de l'opération doit être supérieur à 0");
-        }
+            if ($amount <= 0) {
+                return $this->errorResponse("Le montant de l'opération doit être supérieur à 0");
+            }
 
-        if (strlen($motif) <= 2) {
-            return $this->errorResponse("Veuillez fournir le motif svp!");
-        }
+            if (strlen($motif) <= 2) {
+                return $this->errorResponse("Veuillez fournir le motif svp!");
+            }
 
-        // 🔹 4. Condition spécifique aux dépôts
-        if ($type === 'deposit' && $fundId <= 0) {
-            return $this->errorResponse("Vous devez sélectionner une caisse");
-        }
+            if ($type === 'deposit' && $fundId <= 0 && $nature==='cash_virtual') {
+                return $this->errorResponse("Vous devez sélectionner une caisse");
+            }
 
-        // 🔹 5. Vérification du compte
-        $memberAccount = wekamemberaccounts::find($accountId);
-        if (!$memberAccount) {
-            return $this->errorResponse("Aucun compte trouvé");
-        }
+            $memberAccount = wekamemberaccounts::find($accountId);
+            if (!$memberAccount) {
+                return $this->errorResponse("Aucun compte trouvé");
+            }
 
-        if (!$memberAccount->isavailable()) {
-            return $this->errorResponse("Action non autorisée");
-        }
+            if (!$memberAccount->isavailable()) {
+                return $this->errorResponse("Action non autorisée");
+            }
 
-        if ($memberAccount->account_status !== 'enabled') {
-            return $this->errorResponse("Compte désactivé");
-        }
+            if ($memberAccount->account_status !== 'enabled') {
+                return $this->errorResponse("Compte désactivé");
+            }
 
-        // 🔹 6. Appel du bon gestionnaire selon le type d’opération
-        switch ($type) {
-            case 'deposit':
-                return $this->handleDeposit($request, $memberAccount, $user);
-            case 'withdraw':
-                return $this->handleWithdraw($request, $memberAccount, $user);
-            default:
+           
+               switch ($nature) {
+                case 'cash_virtual':
+                    return $this->cashToVirtual($request);
+                    break;
+                case 'account_account':
+                    return $this->accountToAccount($request);
+                    break;
+                case 'tub_account':
+                    $this->tubToAccount($request);
+                    break; 
+                case 'finance_withdrawal':
+                    $this->financeWithdraw($request);
+                    break; 
+                case 'mobile_money_account':
+                    break;
+                default:
                 return $this->errorResponse("Type d'opération invalide");
-        }
+            }
 
-    } catch (\Exception $e) {
-        DB::rollBack();
-        return $this->errorResponse($e->getMessage(), 500);
+        } catch (\Exception $e) {
+            DB::rollBack();
+            return $this->errorResponse($e->getMessage(), 500);
+        }
     }
-}
 
 
     private function handleDeposit($request, $memberAccount, $user)
@@ -1011,11 +1026,11 @@ class WekaAccountsTransactionsController extends Controller
                 return $this->errorResponse("UUID déjà utilisé");
             }
 
-            // Mise à jour du solde
-            $memberAccount->sold = $memberAccount->sold + $request['amount'];
-            if ($request['transaction_status'] === 'validated') {
-                $memberAccount->save();
-            }
+            // // Mise à jour du solde
+            // $memberAccount->sold = $memberAccount->sold + $request['amount'];
+            // if ($request['transaction_status'] === 'validated') {
+            //     $memberAccount->save();
+            // }
 
             $nature = $request->input('nature');
             if (empty($nature) || $nature === 'null') {
@@ -1024,55 +1039,13 @@ class WekaAccountsTransactionsController extends Controller
 
             switch ($nature) {
                 case 'cash_virtual':
-                    if (!$request->filled('fund_id')) {
-                        return $this->errorResponse("Identifiant de la caisse requis");
-                    }
-
-                    $fund =funds::find($request['fund_id']);
-                    if (!$fund) {
-                        return $this->errorResponse("caisse introuvable");
-                    } 
-                    
-                    if (!$fund->isavailable()) {
-                        return $this->errorResponse("caisse désactivée!");
-                    }
-
-                     if(!$fund->canMakeOperation($user)){
-                        return $this->errorResponse("Vous n'êtes pas autorisé à effectuer des opérations sur cette caisse.");
-                    }
-
-                    if(!$fund->haveTheSameMoneyWith($memberAccount->money_id)){
-                        return $this->errorResponse("la caisse et le compte n'ont pas la même monnaie.");
-                    } 
-                    
-                    $fund->sold = $fund->sold + $request['amount'];
-                    $fund->save();
-                    $makeHistory=requestHistory::create([
-                        'user_id'=>$user->id,
-                        'fund_id'=>$fund->id,
-                        'amount'=>$request['amount'],
-                        'motif'=>$request['motif'],
-                        'type'=>'entry',
-                        'request_id'=>null,
-                        'fence_id'=>null,
-                        'invoice_id'=>null,
-                        'enterprise_id'=>$fund->enterprise_id,
-                        'sold'=>$fund->sold,
-                        'done_at'=>$request['done_at'] ?? date('Y-m-d'),
-                        'account_id'=>null,
-                        'status'=>'validated',
-                        'beneficiary'=>$user->full_name??$user->user_name,
-                        'provenance'=>$user->full_name??$user->user_name,
-                        'uuid'=>$this->getUuId('RH','FH'),
-                        'fund_receiver_id'=>null,
-                        'expenditure_id'=>null,
-                        'member_account_id'=>$memberAccount->id,
-                        'nature'=>'approvment',
-                    ]);
+                    return $this->cashToVirtual($request);
                     break;
                 case 'account_account':
+                    return $this->accountToAccount($request);
                     break;
                 case 'tub_account':
+                    $this->tubToAccount($request);
                     break; 
                 case 'mobile_money_account':
                     break;
@@ -1110,268 +1083,563 @@ class WekaAccountsTransactionsController extends Controller
     }
 
 
-private function handleWithdraw($request, $memberAccount, $user)
+private function financeWithdraw($request)
 {
-    $soldBefore = $memberAccount->sold;
-    $uuid = $request['uuid'] ?? $this->getUuId('WEKA', 'OP');
+    $user=Auth::user();
+    $accountId =$request['member_account_id'] ?? null;
+    $amount=$request['amount'];
+    $motif=$request['motif'];
 
-    if ($memberAccount->sold < $request['amount']) {
-        return $this->errorResponse("Solde insuffisant pour effectuer cette opération");
+    if(!$accountId){
+        return $this->errorResponse("Identifiant du Compte introuvable");
     }
 
+    $memberAccount=wekamemberaccounts::find($accountId);
+
+    if(!$memberAccount){
+        return $this->errorResponse("Compte du membre introuvable");
+    }
+
+    if(!$memberAccount->isavailable()){
+        return $this->errorResponse("Compte du membre désactivé");
+    }
+
+    if (!$request->filled('fund_id')) {
+        return $this->errorResponse("Identifiant de la caisse requis");
+    }
+
+    $fund =funds::find($request['fund_id']);
+    if (!$fund) {
+        return $this->errorResponse("caisse introuvable");
+    } 
+        
+    if (!$fund->isavailable()) {
+        return $this->errorResponse("caisse désactivée!");
+    }
+
+    if(!$fund->canMakeOperation($user)){
+        return $this->errorResponse("Vous n'êtes pas autorisé à effectuer des opérations sur cette caisse.");
+    }
+
+    if(!$fund->haveTheSameMoneyWith($memberAccount->money_id)){
+        return $this->errorResponse("la caisse et le compte n'ont pas la même monnaie.");
+    }
+   
     DB::beginTransaction();
     try {
-        // Vérifie doublon UUID
-        if (wekaAccountsTransactions::where('uuid', $uuid)->exists()) {
-            DB::rollBack();
-            return $this->errorResponse("UUID déjà utilisé");
-        }
-
         // Mise à jour du solde
-        $fees=transactionfee::calculateFee($request['amount'],$memberAccount->money_id,'withdraw');
-        if(($request['amount']+$fees['fee']) > $memberAccount->sold){
-            return $this->errorResponse("Solde insuffisant pour effectuer cette opération avec les frais inclus");  
+        $fees=transactionfee::calculateFee($amount,$memberAccount->money_id,'withdraw');
+        if(!$fees){
+          return $this->errorResponse("Aucun frais de retrait configuré. Veuillez contacter l'admin Système."); 
         }
 
-        $memberAccount->sold = $memberAccount->sold - ($request['amount']+$fees['fee']);
-        if ($request['transaction_status'] === 'validated') {
-            $memberAccount->save();
+        if(($amount+$fees['fee']) > $memberAccount->sold){
+            return $this->errorResponse("Solde du compte membre insuffisant pour effectuer cette opération.");  
         }
+
+        $memberSoldBefore=$memberAccount->sold;
+        $memberAccount->sold = $memberAccount->sold - ($amount+$fees['fee']);
+        $memberSoldAfter=$memberAccount->sold;
+        $memberAccount->save();
+        $transactionMemberAccount =$this->createTransaction(
+            ($amount+$fees['fee']),
+            $memberSoldBefore,
+            $memberSoldAfter,
+            "withdraw",
+            $motif,
+            $user->id,
+            $memberAccount->id,
+            $memberAccount->user_id,
+            null,
+            $request['operation_done_by'] ?? null,
+            $fees['percent'] ?? 0,
+            $request['phone'] ?? null,
+            $request['adresse'] ?? null);
+
+        if($fund->sold<$amount){
+            return $this->errorResponse("Solde de la caisse insuffisant pour effectuer cette opération."); 
+        }
+
+        $fund->sold=$fund->sold-$amount;
+        $fundSoldBefore=$fund->sold;
+        $fund->save();
+         // Création historique transaction pour la caisse
+        $fundRequestHistory=$this->createLocalRequestHistory(
+            $user->id,
+            $fund->id,
+            $fees['fee'],
+            $motif,
+            'withdraw',
+            null,
+            null,
+            null,
+            $fund->sold,
+            null,
+            $fund->description,
+            $memberAccount->description,
+            null,
+            null,
+            $memberAccount->id,
+            'withdrawal'
+        );
 
         $automatiFund =funds::getAutomaticFund($memberAccount->money_id);
         if (!$automatiFund) {
             DB::rollBack();
-            return $this->errorResponse("Aucune caisse automatique trouvée pour terminée cette opération!");
+            return $this->errorResponse("Impossible de terminer l'action. Aucune caisse configurée pour les commissions!");
         }
-         $automatiFund->sold = $automatiFund->sold+$fees['fee'];
-         $automatiFund->save();
-         requestHistory::create([
-            'user_id'=>$user->id,
-            'fund_id'=>$automatiFund->id,
-            'amount'=>$fees['fee'],
-            'motif'=>"Frais de retrait. ".$request['motif'],
-            'type'=>'withdraw',
-            'request_id'=>null,
-            'fence_id'=>null,
-            'invoice_id'=>null,
-            'enterprise_id'=>$automatiFund->enterprise_id,
-            'sold'=>$automatiFund->sold,
-            'done_at'=>date('Y-m-d'),
-            'account_id'=>null,
-            'status'=>'validated',
-            'beneficiary'=>"WEKA AKIBA SYSTEM",
-            'provenance'=>$user->full_name??$user->user_name,
-            'uuid'=>$this->getUuId('RH','FH'),
-            'fund_receiver_id'=>null,
-            'expenditure_id'=>null,
-            'member_account_id'=>$memberAccount->id,
-            'nature'=>'approvment',
-        ]);
 
-        // Création de la transaction
-        $transaction = wekaAccountsTransactions::create([
-            'amount' => $request['amount'],
-            'sold_before' => $soldBefore,
-            'sold_after' => $memberAccount->sold,
-            'type' => 'withdraw',
-            'motif' => $request['motif'],
-            'user_id' => $user->id,
-            'member_account_id' => $memberAccount->id,
-            'member_id' => $memberAccount->user_id,
-            'enterprise_id' => $memberAccount->enterprise_id,
-            'done_at' => $request['done_at'] ?? date('Y-m-d'),
-            'account_id' => $request['account_id'],
-            'operation_done_by' => $user->user_name ?? $user->full_name,
-            'uuid' => $uuid,
-            'fees' =>$fees['percent'] ?? 0,
-            'transaction_status' => $request['transaction_status'] ?? 'pending',
-            'phone' => $request['phone'] ?? null,
-            'adresse' => $request['adresse'] ?? null,
-        ]);
+         $automatiFund->sold = $automatiFund->sold+$fees['fee'];
+         $automatiFundSold= $automatiFund->sold;
+         $automatiFund->save();
+        
+         $AutomaticFundRequest=$this->createLocalRequestHistory(
+            $user->id,
+            $automatiFund->id,
+            $fees['fee'],
+            "Frais de retrait. ".$request['motif'],
+            'withdraw',
+            null,
+            null,
+            null,
+            $automatiFund->sold,
+            null,
+            "WEKA AKIBA SYSTEM",
+            $memberAccount->description,
+            null,
+            null,
+            $memberAccount->id,
+            'approvment'
+        );
 
         DB::commit();
-        return $this->successResponse("succes", $this->show($transaction));
+        return $this->successResponse("success", $this->show($transactionMemberAccount));
 
     } catch (\Exception $e) {
         DB::rollBack();
         return $this->errorResponse($e->getMessage(), 500);
     }
 }
-    // public function store(StorewekaAccountsTransactionsRequest $request)
-    // {
-    //     $soldbefore=0;
-    //     $soldafter=0;
-    //     //if exist the account and not suspended
-    //     if ($request['member_account_id']) {
-    //         //looking for the account
-    //         $memberaccount=wekamemberaccounts::find($request['member_account_id']);
-    //         if ($memberaccount) {
-    //             $canmakemouv=$memberaccount->isavailable();
-    //             if ($canmakemouv) {
-    //                 //if the account is enabled
-    //                 if($memberaccount->account_status=="enabled"){
-    //                     //if withdraw test the sold before making request
-    //                     $soldbefore=$memberaccount->sold;
-    //                     if ($request['type']=='withdraw') {
-    //                         //verify the sold vis the amount sent
-    //                         if ($memberaccount->sold>=$request['amount']) {
-    //                             //begin transaction
-    //                             DB::beginTransaction();
-    //                             try {
-    //                                 $memberaccountupdated=$memberaccount;
-    //                                 $memberaccountupdated->sold=$memberaccount->sold-$request['amount'];
 
-    //                                 if ($request['transaction_status']==='validated') {
-    //                                     $memberaccountupdated->save();
-    //                                 }
-                                    
-    //                                 $ifexistsuuid=wekaAccountsTransactions::where('uuid',$request['uuid'])->get();
-    //                                 if (($ifexistsuuid->count())>0) {
-    //                                     DB::rollBack();
-    //                                     return response()->json([
-    //                                         "status"=>200,
-    //                                         "message"=>"error",
-    //                                         "error"=>"uuid duplicated",
-    //                                         "data"=>$request->all()
-    //                                     ]);
-    //                                 }
+private function accountToTub(Request $request){
+    $user=Auth::user();
+    $accountId =$request['member_account_id'] ?? null;
+    $amount=$request['amount'];
+    $motif=$request['motif'];
 
-    //                                 $savewithdrawtransaction=wekaAccountsTransactions::create([
-    //                                     'amount'=>$request['amount'],
-    //                                     'sold_before'=>$soldbefore,
-    //                                     'sold_after'=> $memberaccountupdated->sold,
-    //                                     'type'=>$request['type'],
-    //                                     'motif'=>$request['motif'],
-    //                                     'user_id'=>$request['user_id'],
-    //                                     'member_account_id'=>$memberaccount->id,
-    //                                     'member_id'=>$memberaccount->user_id,
-    //                                     'enterprise_id'=>$memberaccount->enterprise_id,
-    //                                     'done_at'=>$request['done_at']?$request['done_at']:date('Y-m-d'),
-    //                                     'account_id'=>$request['account_id'],
-    //                                     'operation_done_by'=>$request['operation_done_by'],
-    //                                     'uuid'=>$request['uuid']?$request['uuid']:$this->getUuId('WEKA','OP'),
-    //                                     'fees'=>$request['fees'],
-    //                                     'transaction_status'=>$request['transaction_status'],
-    //                                     'phone'=>$request['phone'],
-    //                                     'adresse'=>$request['adresse']
-    //                                 ]);
-    //                                 DB::commit();
-    //                                 return response()->json([
-    //                                     "status"=>200,
-    //                                     "message"=>"success",
-    //                                     "error"=>null,
-    //                                     "data"=>$this->show($savewithdrawtransaction)
-    //                                 ]);
-    //                             } catch (Exception $th) {
-    //                                 DB::rollBack();
-    //                                 //throw $th;
-    //                                 return response()->json([
-    //                                     "status"=>500,
-    //                                     "message"=>"error",
-    //                                     "error"=>$th->getMessage(),
-    //                                     "data"=>null
-    //                                 ]);
-    //                             }
-    //                         }else {
-    //                             return response()->json([
-    //                                 "status"=>401,
-    //                                 "message"=>"error",
-    //                                 "error"=>"sold not enough",
-    //                                 "data"=>null
-    //                             ]);
-    //                         }
-    //                     }
+    if(!$accountId){
+        return $this->errorResponse("Identifiant du Compte introuvable");
+    }
 
-    //                     //if is entry
-    //                     if ($request['type']=='deposit') {
-    //                             //begin transaction
-    //                             DB::beginTransaction();
-    //                             try {
-    //                                 $memberaccountupdated=$memberaccount;
-    //                                 $memberaccountupdated->sold=$memberaccount->sold+$request['amount'];
-    //                                 if ($request['transaction_status']=='validated') {
-    //                                     $memberaccountupdated->save();
-    //                                 }
-                                    
-    //                                 $ifexistsuuid=wekaAccountsTransactions::where('uuid',$request['uuid'])->get();
-    //                                 if (($ifexistsuuid->count())>0) {
-    //                                     DB::rollBack();
-                                        
-    //                                     return response()->json([
-    //                                         "status"=>200,
-    //                                         "message"=>"error",
-    //                                         "error"=>"uuid duplicated",
-    //                                         "data"=>$request->all()
-    //                                     ]);
-    //                                 }
+    $memberAccount=wekamemberaccounts::find($accountId);
 
-    //                                 $savewithdrawtransaction=wekaAccountsTransactions::create([
-    //                                     'amount'=>$request['amount'],
-    //                                     'sold_before'=>$soldbefore,
-    //                                     'sold_after'=> $memberaccountupdated->sold,
-    //                                     'type'=>$request['type'],
-    //                                     'motif'=>$request['motif'],
-    //                                     'user_id'=>$request['user_id'],
-    //                                     'member_account_id'=>$memberaccount->id,
-    //                                     'member_id'=>$memberaccount->user_id,
-    //                                     'enterprise_id'=>$memberaccount->enterprise_id,
-    //                                     'done_at'=>$request['done_at']?$request['done_at']:date('Y-m-d'),
-    //                                     'account_id'=>$request['account_id'],
-    //                                     'operation_done_by'=>$request['operation_done_by'],
-    //                                     'uuid'=>$request['uuid']?$request['uuid']:$this->getUuId('WEKA','OP'),
-    //                                     'fees'=>$request['fees'],
-    //                                     'transaction_status'=>$request['transaction_status'],
-    //                                     'phone'=>$request['phone'],
-    //                                     'adresse'=>$request['adresse']
-    //                                 ]);
-    //                                 DB::commit();
-    //                                 return response()->json([
-    //                                     "status"=>200,
-    //                                     "message"=>"success",
-    //                                     "error"=>null,
-    //                                     "data"=>$this->show($savewithdrawtransaction)
-    //                                 ]);
-    //                             } catch (Exception $th) {
-    //                                 DB::rollBack();
-    //                                 //throw $th;
-    //                                 return response()->json([
-    //                                     "status"=>500,
-    //                                     "message"=>"error",
-    //                                     "error"=>$th,
-    //                                     "data"=>null
-    //                                 ]);
-    //                             }
-                        
-    //                     }
-    //                 }else{
-    //                     return response()->json([
-    //                         "status"=>401,
-    //                         "message"=>"error",
-    //                         "error"=>"account disabled",
-    //                         "data"=>null
-    //                     ]);
-    //                 }
-    //             }else{
-    //                 return $this->errorResponse('unauthorized action');
-    //             }
-    //         }else{
-    //             return response()->json([
-    //                 "status"=>401,
-    //                 "message"=>"error",
-    //                 "error"=>"no account find",
-    //                 "data"=>null
-    //             ]); 
-    //         }
-    //     }else{
-    //         return response()->json([
-    //             "status"=>400,
-    //             "message"=>"error",
-    //             "error"=>"no account sent",
-    //             "data"=>null
-    //         ]);  
-    //     }
-    // }
+    if(!$memberAccount){
+        return $this->errorResponse("Compte du membre introuvable");
+    }
+
+    if(!$memberAccount->isavailable()){
+        return $this->errorResponse("Compte du membre désactivé");
+    }
+
+    if (!$request->filled('fund_id')) {
+        return $this->errorResponse("Identifiant de la caisse requis");
+    }
+
+    $fund =funds::find($request['fund_id']);
+    if (!$fund) {
+        return $this->errorResponse("caisse introuvable");
+    } 
+        
+    if (!$fund->isavailable()) {
+        return $this->errorResponse("caisse désactivée!");
+    }
+
+    if(!$fund->canMakeOperation($user)){
+        return $this->errorResponse("Vous n'êtes pas autorisé à effectuer des opérations sur cette caisse.");
+    }
+
+    if(!$fund->haveTheSameMoneyWith($memberAccount->money_id)){
+        return $this->errorResponse("la caisse et le compte n'ont pas la même monnaie.");
+    }
+
+    try{
+        DB::beginTransaction();
+        $fund->sold = $fund->sold + $amount;
+        $fund->save();
+        $makeHistory=$this->createLocalRequestHistory(
+            $user->id,
+            $fund->id,
+            $amount,
+            $motif,
+            'entry',
+            null,
+            null,
+            null,
+            $fund->sold,
+            null,
+            $user->full_name??$user->user_name,
+            $fund->description,
+            null,
+            null,
+            $memberAccount->id,
+            'approvment'
+        );
+        $memberAccountSoldBefore=$memberAccount->sold;
+        $memberAccount->sold=$memberAccount->sold+$amount;
+        $memberAccountSoldAfter=$memberAccount->sold;
+        $memberAccount->save();
+        $transaction=$this->createTransaction(
+            $amount,
+            $memberAccountSoldBefore,
+            $memberAccountSoldAfter,
+            "entry",
+            $motif,
+            $user->id,
+            $memberAccount->id,
+            $memberAccount->user_id,
+            null,
+            $user->full_name?$user->full_name:$user->user_name,
+            0,
+            $user->user_phone?? null,
+            $user->adress?? null
+        );
+        DB::commit();
+        return $this->successResponse('success',$this->show($transaction));
+    }catch (\Exception $e){
+        DB::rollBack();
+        return $this->errorResponse($e->getMessage(), 500);
+    } 
+}
+
+private function cashToVirtual(Request $request){
+    $user=Auth::user();
+    $accountId =$request['member_account_id'] ?? null;
+    $amount=$request['amount'];
+    $motif=$request['motif'];
+
+    if(!$accountId){
+        return $this->errorResponse("Identifiant du Compte introuvable");
+    }
+
+    $memberAccount=wekamemberaccounts::find($accountId);
+
+    if(!$memberAccount){
+        return $this->errorResponse("Compte du membre introuvable");
+    }
+
+    if(!$memberAccount->isavailable()){
+        return $this->errorResponse("Compte du membre désactivé");
+    }
+
+    if (!$request->filled('fund_id')) {
+        return $this->errorResponse("Identifiant de la caisse requis");
+    }
+
+    $fund =funds::find($request['fund_id']);
+    if (!$fund) {
+        return $this->errorResponse("caisse introuvable");
+    } 
+        
+    if (!$fund->isavailable()) {
+        return $this->errorResponse("caisse désactivée!");
+    }
+
+    if(!$fund->canMakeOperation($user)){
+        return $this->errorResponse("Vous n'êtes pas autorisé à effectuer des opérations sur cette caisse.");
+    }
+
+    if(!$fund->haveTheSameMoneyWith($memberAccount->money_id)){
+        return $this->errorResponse("la caisse et le compte n'ont pas la même monnaie.");
+    }
+
+    try{
+        DB::beginTransaction();
+        $fund->sold = $fund->sold + $amount;
+        $fund->save();
+        $makeHistory=$this->createLocalRequestHistory(
+            $user->id,
+            $fund->id,
+            $amount,
+            $motif,
+            'entry',
+            null,
+            null,
+            null,
+            $fund->sold,
+            null,
+            $user->full_name??$user->user_name,
+            $fund->description,
+            null,
+            null,
+            $memberAccount->id,
+            'approvment'
+        );
+        $memberAccountSoldBefore=$memberAccount->sold;
+        $memberAccount->sold=$memberAccount->sold+$amount;
+        $memberAccountSoldAfter=$memberAccount->sold;
+        $memberAccount->save();
+        $transaction=$this->createTransaction(
+            $amount,
+            $memberAccountSoldBefore,
+            $memberAccountSoldAfter,
+            "entry",
+            $motif,
+            $user->id,
+            $memberAccount->id,
+            $memberAccount->user_id,
+            null,
+            $user->full_name?$user->full_name:$user->user_name,
+            0,
+            $user->user_phone?? null,
+            $user->adress?? null
+        );
+        DB::commit();
+        return $this->successResponse('success',$this->show($transaction));
+    }catch (\Exception $e){
+        DB::rollBack();
+        return $this->errorResponse($e->getMessage(), 500);
+    } 
+}
+
+private function tubToAccount(Request $request){
+    $user=Auth::user();
+    $amount = $request['amount'] ?? 0;
+    $accountId =$request['member_account_id'] ?? null;
+     $motif = $request['motif'] ?? '';
     
+    if(!$accountId){
+        return $this->errorResponse("Identifiant du compte membre requis");
+    }
+    $memberAccount=wekamemberaccounts::find($accountId);
+
+    if (!$memberAccount) {
+        return $this->errorResponse("compte du membre introuvable");   # code...
+    }
+
+    if (!$request->filled('fund_id')) {
+        return $this->errorResponse("Identifiant de la caisse requis");
+    }
+
+    $fund =funds::find($request['fund_id']);
+
+    if (!$fund) {
+        return $this->errorResponse("caisse introuvable");
+    } 
+        
+    if (!$fund->isavailable()) {
+        return $this->errorResponse("caisse désactivée!");
+    }
+
+    if(!$fund->canMakeOperation($user)){
+        return $this->errorResponse("Vous n'êtes pas autorisé à effectuer des opérations sur cette caisse.");
+    }
+
+    if(!$fund->haveTheSameMoneyWith($memberAccount->money_id)){
+        return $this->errorResponse("la caisse et le compte n'ont pas la même monnaie.");
+    } 
+    
+    if ($amount <= 0) {
+        return $this->errorResponse("Le montant de l'opération doit être supérieur à 0.");
+    }
+     
+    if (strlen($motif) <= 2) {
+        return $this->errorResponse("Veuillez fournir le motif svp!");
+    }
+
+    $fund->sold= $fund->sold - $amount;
+    $fund->save();
+    $makeHistory=$this->createLocalRequestHistory(
+        $user->id,
+        $fund->id,
+        $request['amount'],
+        $request['motif'],
+        'entry',
+        null,
+        null,
+        null,
+        $fund->enterprise_id,
+        $fund->sold,
+        date('Y-m-d'),
+        null,
+        'validated',
+        $user->full_name??$user->user_name,
+        $user->full_name??$user->user_name,
+        $this->getUuId('RH','FH'),
+        null,
+        null,
+        $memberAccount->id,
+        'approvment');
+
+    $memberAccountsoldbefore=$memberAccount->sold;
+    $memberAccount->sold=$memberAccount->sold+$amount;
+    $memberAccount->save();
+    $memberAccountsoldafter=$memberAccount->sold;   
+        
+    $this->createTransaction(
+        $amount,
+        $memberAccountsoldbefore,
+        $memberAccountsoldafter,
+        'withdraw',
+        $motif,
+        $user->id,
+        $memberAccount->id,
+        $memberAccount->user_id,
+        null,
+        $user->full_name?$user->full_name:$user->user_name,
+        0,
+        $user->user_phone?? null,
+        $user->adress?? null
+    );
+   return $this->successResponse('success',$this->show($makeHistory));
+}
+
+private function accountToAccount(Request $request){
+    $user=Auth::user();
+    $accountSource=$request['member_account_id'] ?? null;
+    $accountBeneficiary=$request['beneficiary_account_id'] ?? null;
+    $amount = $request['amount'] ?? 0;
+    $totalAmount=$amount;
+    $motif = $request['motif'] ?? '';
+    $payment=0;
+
+    if (!$accountSource || $accountSource <= 0) {
+        return $this->errorResponse("Vous devez sélectionner un compte source.");
+    } 
+    
+    if (!$accountBeneficiary || $accountBeneficiary <= 0) {
+        return $this->errorResponse("Vous devez sélectionner un compte bénéficiaire.");
+    }
+
+    if ($amount <= 0) {
+        return $this->errorResponse("Le montant de l'opération doit être supérieur à 0.");
+    }
+
+    if (strlen($motif) <= 2) {
+        return $this->errorResponse("Veuillez fournir le motif svp!");
+    }
+
+    $sourceMemberAccount = wekamemberaccounts::find($accountSource);
+    if (!$sourceMemberAccount) {
+        return $this->errorResponse("Aucun compte source trouvé");
+    }
+
+    if (!$sourceMemberAccount->isavailable()) {
+        return $this->errorResponse("Action sur le compte source non autorisée.");
+    }
+
+    $beneficiaryMemberAccount = wekamemberaccounts::find($accountBeneficiary);
+    if (!$beneficiaryMemberAccount) {
+        return $this->errorResponse("Aucun compte bénéficiaire trouvé.");
+    }
+
+    if (!$beneficiaryMemberAccount->isavailable()) {
+        return $this->errorResponse("Action sur le compte bénéficiaire non autorisée.");
+    }
+
+    if(!$beneficiaryMemberAccount->money_id!==$sourceMemberAccount->money_id){
+        return $this->errorResponse("Les deux comptes n'utilisent pas la même monnaie.");
+    }
+
+    if($sourceMemberAccount->sold<$totalAmount){
+        return $this->errorResponse("Votre solde est insuffisant pour effectuer cette opération.");
+    }
+
+    if ($user->collector) {
+        if(!$user->collection_percentage || $user->collection_percentage<=0){
+            return $this->errorResponse("Aucun pourcentage de commission configuré pour le collecteur."); 
+        }
+        $fees=transactionfee::calculateFee($amount,$sourceMemberAccount->money_id,'withdraw');
+        $payment=($fees['fee']*$user->collection_percentage)/100;
+        //introduce sauvegarde des commissions recues ici...
+    }
+   $sourceSoldBefore=$sourceMemberAccount->sold;
+   $sourceMemberAccount->sold = $sourceMemberAccount->sold - $totalAmount;
+   $sourceSoldAfter= $sourceMemberAccount->sold;
+   $sourceMemberAccount->save();
+   $sourceTransaction=$this->createTransaction(
+    $totalAmount,
+    $sourceSoldBefore,
+    $sourceSoldAfter,
+    "withdraw",
+    $motif,
+    $user->id,
+    $sourceMemberAccount->id,
+    $sourceMemberAccount->user_id,
+    null,
+    $user->full_name?$user->full_name:$user->user_name,
+    $payment,
+    $user->user_phone?? null,
+    $user->adress?? null
+   );
+
+   $beneficiarySoldBefore=$beneficiaryMemberAccount->sold;
+   $beneficiaryMemberAccount->sold = $beneficiaryMemberAccount->sold + $totalAmount;
+   $beneficiarySoldAfter=$beneficiaryMemberAccount->sold;
+   $beneficiaryMemberAccount->save();
+    $this->createTransaction(
+    $totalAmount,
+    $beneficiarySoldBefore,
+    $beneficiarySoldAfter,
+    "entry",
+    $motif,
+    $user->id,
+    $beneficiaryMemberAccount->id,
+    $beneficiaryMemberAccount->user_id,
+    null,
+    $user->full_name?$user->full_name:$user->user_name,
+    $payment,
+    $user->user_phone?? null,
+    $user->adress?? null
+   );
+   return $this->successResponse('success',$this->show($sourceTransaction));
+}
+
+private function createTransaction($amount,$soldBefore,$soldAfter,$type,$motif,$userId,$memberAccountId,$memberId,$accountId,$operationDoneBy,$fees,$phone,$adresse){
+    return wekaAccountsTransactions::create([
+        'amount' => $amount,
+        'sold_before' => $soldBefore,
+        'sold_after' => $soldAfter,
+        'type' => $type,
+        'motif' => $motif,
+        'user_id' => $userId,
+        'member_account_id' => $memberAccountId,
+        'member_id' => $memberId,
+        'enterprise_id' =>$this->getEse($userId)['id'],
+        'done_at' =>date('Y-m-d'),
+        'account_id' => $accountId,
+        'operation_done_by' =>$operationDoneBy,
+        'uuid' => $this->getUuId('WT','WK'),
+        'fees' =>$fees,
+        'transaction_status' =>'validated',
+        'phone' => $phone,
+        'adresse' => $adresse,
+    ]); 
+}
+
+    private function createLocalRequestHistory($userId,$fundId,$amount,$motif,$type,$requestId,$fenceId,$invoiceId,$sold,$accountId,$beneficiary,$provenance,$fendReceiverId,$expenditureId,$memberAccountId,$nature){
+        return  requestHistory::create([
+            'user_id'=>$userId,
+            'fund_id'=>$fundId,
+            'amount'=>$amount,
+            'motif'=>$motif,
+            'type'=>$type,
+            'request_id'=>$requestId,
+            'fence_id'=>$fenceId,
+            'invoice_id'=>$invoiceId,
+            'enterprise_id'=>$this->getEse($userId)['id'],
+            'sold'=>$sold,
+            'done_at'=>date('Y-m-d'),
+            'account_id'=>$accountId,
+            'status'=>'validated',
+            'beneficiary'=>$beneficiary,
+            'provenance'=>$provenance,
+            'uuid'=>$this->getUuId('RH','FH'),
+            'fund_receiver_id'=>$fendReceiverId,
+            'expenditure_id'=>$expenditureId,
+            'member_account_id'=>$memberAccountId,
+            'nature'=>$nature,
+        ]);
+    }
     /**
      * transaction resume before validate
      */
