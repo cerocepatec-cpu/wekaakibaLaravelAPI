@@ -979,14 +979,9 @@ class WekaAccountsTransactionsController extends Controller
             }
 
             if (!$memberAccount->isavailable()) {
-                return $this->errorResponse("Action non autorisée");
+                return $this->errorResponse("Le compte du membre est désactivé. Action non autorisée");
             }
 
-            if ($memberAccount->account_status !== 'enabled') {
-                return $this->errorResponse("Compte désactivé");
-            }
-
-           
                switch ($nature) {
                 case 'cash_virtual':
                     return $this->cashToVirtual($request);
@@ -1536,7 +1531,7 @@ private function accountToAccount(Request $request){
         return $this->errorResponse("Action sur le compte bénéficiaire non autorisée.");
     }
 
-    if(!$beneficiaryMemberAccount->money_id!==$sourceMemberAccount->money_id){
+    if($beneficiaryMemberAccount->money_id!==$sourceMemberAccount->money_id){
         return $this->errorResponse("Les deux comptes n'utilisent pas la même monnaie.");
     }
 
@@ -1544,14 +1539,14 @@ private function accountToAccount(Request $request){
         return $this->errorResponse("Votre solde est insuffisant pour effectuer cette opération.");
     }
 
-    if ($user->collector) {
-        if(!$user->collection_percentage || $user->collection_percentage<=0){
-            return $this->errorResponse("Aucun pourcentage de commission configuré pour le collecteur."); 
-        }
-        $fees=transactionfee::calculateFee($amount,$sourceMemberAccount->money_id,'withdraw');
-        $payment=($fees['fee']*$user->collection_percentage)/100;
-        //introduce sauvegarde des commissions recues ici...
-    }
+    // if ($user->collector) {
+    //     if(!$user->collection_percentage || $user->collection_percentage<=0){
+    //         return $this->errorResponse("Aucun pourcentage de commission configuré pour le collecteur."); 
+    //     }
+    //     $fees=transactionfee::calculateFee($amount,$sourceMemberAccount->money_id,'withdraw');
+    //     $payment=($fees['fee']*$user->collection_percentage)/100;
+    //     //introduce sauvegarde des commissions recues ici...
+    // }
    $sourceSoldBefore=$sourceMemberAccount->sold;
    $sourceMemberAccount->sold = $sourceMemberAccount->sold - $totalAmount;
    $sourceSoldAfter= $sourceMemberAccount->sold;
