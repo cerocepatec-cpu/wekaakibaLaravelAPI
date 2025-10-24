@@ -2,17 +2,18 @@
 
 namespace App\Http\Controllers;
 
+use stdClass;
+use App\Models\User;
+use App\Models\moneys;
+use Illuminate\Http\Request;
 use App\Models\wekamemberaccounts;
+use Illuminate\Support\Facades\DB;
 use App\Http\Controllers\Controller;
+ use Carbon\Carbon;
+use Illuminate\Support\Facades\Auth;
+use App\Models\wekaAccountsTransactions;
 use App\Http\Requests\StorewekamemberaccountsRequest;
 use App\Http\Requests\UpdatewekamemberaccountsRequest;
-use App\Models\moneys;
-use App\Models\User;
-use App\Models\wekaAccountsTransactions;
- use Carbon\Carbon;
-use Illuminate\Http\Request;
-use Illuminate\Support\Facades\DB;
-use stdClass;
 
 class WekamemberaccountsController extends Controller
 {
@@ -31,7 +32,7 @@ class WekamemberaccountsController extends Controller
      */
     public function allaccounts($user){
         $list=[];
-        $actualuser=$this->getinfosuser($user);
+        $actualuser=Auth::user();
         $ese=$this->getEse($user);
         if ($actualuser) {
             $list= wekamemberaccounts::leftjoin('users as U', 'wekamemberaccounts.user_id','=','U.id')
@@ -45,15 +46,20 @@ class WekamemberaccountsController extends Controller
 
     public function searchaccountsbyenterprise(Request $request)
     {
-        $user = $request->query('user_id');
         $keyword = $request->query('keyword');
         $limit = $request->query('limit', 50);
+        $actualuser =Auth::user();
+        if (!$actualuser) {
+            return $this->errorResponse("Utilisateur non authentifié!",400);
+        }
 
-        $actualuser = $this->getinfosuser($user);
-        $ese = $this->getEse($user);
+        $ese = $this->getEse($actualuser->id);
+        if (!$ese) {
+           return $this->errorResponse("Vous n'êtes pas autorisé à faire cette opération!",400);
+        }
 
-        if (!$actualuser || !$ese) {
-            return response()->json([]);
+        if(!$keyword){
+            return $this->errorResponse("Aucune clé de recherche fournie!",400);
         }
 
         $subquery =DB::table('usersenterprises')
@@ -65,7 +71,7 @@ class WekamemberaccountsController extends Controller
             ->whereIn('wekamemberaccounts.user_id', $subquery);
 
         if ($actualuser['user_type'] !== 'super_admin') {
-            $query->where('wekamemberaccounts.user_id', $user);
+            $query->where('wekamemberaccounts.user_id', $actualuser->id);
         }
 
         if ($keyword) {

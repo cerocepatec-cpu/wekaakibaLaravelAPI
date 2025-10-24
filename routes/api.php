@@ -150,6 +150,7 @@ Route::middleware(['auth:sanctum'])->group(function () {
     Route::get('/weka/searchaccountsbyenterprise',[WekamemberaccountsController::class,'searchaccountsbyenterprise']);
     Route::post('/weka/usersbytypes/enterprise',[UsersController::class,'usersbytypes']);
     Route::get('/weka/allaccounts/{id}',[WekamemberaccountsController::class,'allaccounts']);
+    Route::get('/weka/member/accounts/{id}',[WekamemberaccountsController::class,'membersaccounts']);
     Route::post('/weka/members/lookup',[UsersController::class,'wekamemberslookup']);
     Route::get('/weka/account/transactions',[WekaAccountsTransactionsController::class,'getTransactionsByAccount']);
     Route::post('/funds/savemultiples',[RequestHistoryController::class,'savemultiple']);
