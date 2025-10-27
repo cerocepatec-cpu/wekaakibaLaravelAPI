@@ -148,6 +148,7 @@ Route::middleware(['auth:sanctum'])->group(function () {
     Route::get('/money/enterprise/{id}',[MoneysController::class,'index']);
     Route::get('/request_history/byfund/{fund}',[RequestHistoryController::class,'getbyfund']);
     Route::get('/weka/searchaccountsbyenterprise',[WekamemberaccountsController::class,'searchaccountsbyenterprise']);
+    Route::post('/weka/searchsingleaccount',[WekamemberaccountsController::class,'searchSingleAccount']);
     Route::post('/weka/usersbytypes/enterprise',[UsersController::class,'usersbytypes']);
     Route::get('/weka/allaccounts/{id}',[WekamemberaccountsController::class,'allaccounts']);
     Route::get('/weka/member/accounts/{id}',[WekamemberaccountsController::class,'membersaccounts']);

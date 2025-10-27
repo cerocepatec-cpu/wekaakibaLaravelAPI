@@ -91,7 +91,45 @@ class WekamemberaccountsController extends Controller
 
         return response()->json($list);
     }
+        
+    public function searchSingleAccount(Request $request)
+    {
+        $request->validate(['keyword' => 'required|string']);
+        $actualuser = Auth::user();
 
+        if (!$actualuser) {
+            return $this->errorResponse("Utilisateur non authentifié!", 400);
+        }
+
+        $ese = $this->getEse($actualuser->id);
+        if (!$ese) {
+            return $this->errorResponse("Impossible de vous identifier.", 400);
+        }
+
+        try {
+            $account = wekamemberaccounts::join('users as U', 'wekamemberaccounts.user_id', '=', 'U.id')
+                ->where('wekamemberaccounts.enterprise_id', $ese->id)
+                ->where(function ($query) use ($request) {
+                    $keyword = $request->keyword;
+                    $query->where('wekamemberaccounts.description', $keyword)
+                        ->orWhere('wekamemberaccounts.account_number', $keyword)
+                        ->orWhere('U.uuid', $keyword)
+                        ->orWhere('U.user_name', $keyword)
+                        ->orWhere('U.full_name', $keyword);
+                })
+                ->select('wekamemberaccounts.*')
+                ->first();
+
+            if (!$account) {
+                return $this->errorResponse("Compte introuvable.", 404);
+            }
+             unset($account->sold);
+            return $this->successResponse('success', $this->show($account));
+
+        } catch (\Throwable $th) {
+            return $this->errorResponse($th->getMessage(), 500);
+        }
+    }
 
     /**
      * 
@@ -219,9 +257,11 @@ class WekamemberaccountsController extends Controller
      */
     public function show(wekamemberaccounts $wekamemberaccounts)
     {
-       return wekamemberaccounts::leftjoin('users as U', 'wekamemberaccounts.user_id','=','U.id')
+       $account=wekamemberaccounts::leftjoin('users as U', 'wekamemberaccounts.user_id','=','U.id')
         ->leftjoin('moneys as M', 'wekamemberaccounts.money_id','=','M.id')
         ->where('wekamemberaccounts.id',$wekamemberaccounts->id)->first(['M.abreviation as money_abreviation', 'U.user_name', 'wekamemberaccounts.*']);
+         unset($account->sold);
+        return $account;
     }
     /**
      * Display the specified resource.
