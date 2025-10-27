@@ -15,6 +15,7 @@ use Carbon\Carbon;
 use Illuminate\Support\Facades\Password;
 use Illuminate\Support\Facades\Log;
 use App\Mail\PasswordResetSuccessMail;
+use App\Models\PasswordReset;
 use Illuminate\Support\Facades\Cache;
 
 class AuthController extends Controller
@@ -141,12 +142,12 @@ class AuthController extends Controller
         // Génération d’un OTP à 6 chiffres
         $code = rand(100000, 999999);
 
-       DB::table('password_resets')->where('email', $user->email)->delete();
-        DB::table('password_resets')->insert([
+       PasswordReset::where('email', $user->email)->delete();
+        PasswordReset::create([
             'email' => $user->email,
             'token' => $token,
             'code' => $code,
-            'created_at' => now(),
+            'created_at' => now()
         ]);
 
 
