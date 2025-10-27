@@ -26,7 +26,7 @@ public $timestamps = false;
 */
 public function isExpired($minutes = 15)
 {
-return $this->created_at < now()->subMinutes($minutes);
+    return $this->created_at < now()->subMinutes($minutes);
 }
 
 /**
@@ -51,12 +51,23 @@ public static function generateOTP($email, $minutes = 15)
     $token = bcrypt(Str::random(60));
 
     // Stockage ou mise à jour
-    return self::updateOrCreate(
-        ['email' => $email],
-        [
-        'code' => $code,
-        'token' => $token,
-        'created_at' => now(),
+   $record = self::where('email', $email)->first();
+
+    if ($record) {
+        $record->update([
+            'code' => $code,
+            'token' => $token,
+            'created_at' => now(),
+        ]);
+    } else {
+        $record = self::create([
+            'email' => $email,
+            'code' => $code,
+            'token' => $token,
+            'created_at' => now(),
         ]);
     }
+
+    return $record;
+}
 }

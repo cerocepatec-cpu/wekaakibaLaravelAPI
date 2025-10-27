@@ -557,7 +557,8 @@ class AuthController extends Controller
                 'enterprise'      => $actualEse,
                 'defaultmoney'    => $this->defaultmoney($actualEse['id'] ?? null),
                 'access_token'    => $plainTextToken,       // token à utiliser pour Authorization Bearer
-                'expires_in'      => 3600,                   // 10 minutes en secondes
+                'expires_in'      => 3600,
+                'permissions'     =>$user->permissions(),                   // 10 minutes en secondes
                 'refresh_token'   => $refreshTokenString,
                 'refresh_expires_at' => $refreshToken->expires_at,
             ]);
