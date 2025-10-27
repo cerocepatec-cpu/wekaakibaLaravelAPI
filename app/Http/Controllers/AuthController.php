@@ -137,24 +137,25 @@ class AuthController extends Controller
         }
 
         // Génération du token sécurisé Laravel
-        $token = Password::broker()->createToken($user);
+        $passwordReset=PasswordReset::generateOTP($user->email);
+        // $token = Password::broker()->createToken($user);
 
         // Génération d’un OTP à 6 chiffres
-        $code = rand(100000, 999999);
+        // $code = rand(100000, 999999);
 
-       PasswordReset::where('email', $user->email)->delete();
-        PasswordReset::create([
-            'email' => $user->email,
-            'token' => $token,
-            'code' => $code,
-            'created_at' => now()
-        ]);
+    //    PasswordReset::where('email', $user->email)->delete();
+    //     PasswordReset::create([
+    //         'email' => $user->email,
+    //         'token' => $token,
+    //         'code' => $code,
+    //         'created_at' => now()
+    //     ]);
 
 
         // Envoi selon le type choisi
         if ($request->type === 'email') {
             try {
-                Mail::raw("Votre code de réinitialisation est : $code", function ($message) use ($user) {
+                Mail::raw("Votre code de réinitialisation est : $passwordReset->code", function ($message) use ($user) {
                     $message->to($user->email)
                             ->subject('🔐 Réinitialisation du mot de passe');
                 });
