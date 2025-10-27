@@ -141,19 +141,14 @@ class AuthController extends Controller
         // Génération d’un OTP à 6 chiffres
         $code = rand(100000, 999999);
 
-        // Stockage dans password_resets
-        DB::table('password_resets')->updateOrInsert(
-            ['email' => $user->email],
-            [
-                'token' => $token,
-                'code' => $code,
-                'created_at' => now(),
-            ]
-        );
+       DB::table('password_resets')->where('email', $user->email)->delete();
+        DB::table('password_resets')->insert([
+            'email' => $user->email,
+            'token' => $token,
+            'code' => $code,
+            'created_at' => now(),
+        ]);
 
-        // Logs pour debug
-        Log::info('Token Laravel généré : ' . $token);
-        Log::info('Code OTP généré : ' . $code);
 
         // Envoi selon le type choisi
         if ($request->type === 'email') {
@@ -163,7 +158,6 @@ class AuthController extends Controller
                             ->subject('🔐 Réinitialisation du mot de passe');
                 });
             } catch (\Exception $e) {
-                Log::error('Erreur d’envoi email : ' . $e->getMessage());
                 return $this->errorResponse('Erreur lors de l’envoi de l’email. Veuillez réessayer plus tard.', 500);
             }
         } else {
