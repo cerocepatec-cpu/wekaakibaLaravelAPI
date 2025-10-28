@@ -1,5 +1,6 @@
 <?php
-namespace  App\Models;
+
+namespace App\Models;
 
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
@@ -8,60 +9,66 @@ use Carbon\Carbon;
 
 class PasswordReset extends Model
 {
-use HasFactory;
+    use HasFactory;
 
-protected $table = "password_resets";
+    protected $table = "password_resets";
 
-protected $fillable = [
-'email',
-'token',
-'code',
-'created_at',
-];
+    protected $fillable = [
+        'email',
+        'token',
+        'code',
+        'created_at',
+    ];
 
-public $timestamps = false;
+    public $timestamps = false;
 
-/**
-* Vérifie si le code est expiré
-*/
-public function isExpired($minutes = 15)
-{
-    return $this->created_at < now()->subMinutes($minutes);
-}
+    // 🚨 Ajoute ces deux lignes essentielles :
+    protected $primaryKey = null;
+    public $incrementing = false;
 
-/**
-* Génère un OTP sécurisé et l'enregistre dans la table
-*/
-public static function generateOTP($email, $minutes = 15)
-{
-    // Supprime les anciens OTP expirés pour cet email
-    self::where('email', $email)
-    ->where('created_at', '<', Carbon::now()->subMinutes($minutes))
-    ->delete();
+    /**
+     * Vérifie si le code est expiré
+     */
+    public function isExpired($minutes = 15)
+    {
+        return $this->created_at < now()->subMinutes($minutes);
+    }
 
-    // Génération d'un code unique
-    do {
-        $code = rand(100000, 999999);
-        $exists = self::where('code', $code)
-        ->where('created_at', '>=', Carbon::now()->subMinutes($minutes))
-        ->exists();
-    } while ($exists);
+    /**
+     * Génère un OTP sécurisé et l'enregistre dans la table
+     */
+    public static function generateOTP($email, $minutes = 15)
+    {
+        // Supprime les anciens OTP expirés pour cet email
+        self::where('email', $email)
+            ->where('created_at', '<', Carbon::now()->subMinutes($minutes))
+            ->delete();
 
-    // Génération du token sécurisé
-    $token = bcrypt(Str::random(60));
+        // Génération d'un code unique
+        do {
+            $code = rand(100000, 999999);
+            $exists = self::where('code', $code)
+                ->where('created_at', '>=', Carbon::now()->subMinutes($minutes))
+                ->exists();
+        } while ($exists);
 
-    // Stockage ou mise à jour
-   $record = self::where('email', $email)->first();
+        // Génération du token sécurisé
+        $token = bcrypt(Str::random(60));
 
-    if ($record) {
-        $record->delete();
-    } 
-     $record = self::create([
+        // Stockage : suppression puis insertion
+        $record = self::where('email', $email)->first();
+
+        if ($record) {
+            $record->delete();
+        }
+
+        $record = self::create([
             'email' => $email,
             'code' => $code,
             'token' => $token,
             'created_at' => now(),
-    ]);
-    return $record;
-}
+        ]);
+
+        return $record;
+    }
 }
