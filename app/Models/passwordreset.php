@@ -54,20 +54,14 @@ public static function generateOTP($email, $minutes = 15)
    $record = self::where('email', $email)->first();
 
     if ($record) {
-        $record->update([
-            'code' => $code,
-            'token' => $token,
-            'created_at' => now(),
-        ]);
-    } else {
-        $record = self::create([
+        $record->delete();
+    } 
+     $record = self::create([
             'email' => $email,
             'code' => $code,
             'token' => $token,
             'created_at' => now(),
-        ]);
-    }
-
+    ]);
     return $record;
 }
 }
