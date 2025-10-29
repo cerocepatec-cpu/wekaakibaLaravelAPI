@@ -25,6 +25,7 @@ use App\Models\wekaAccountsTransactions;
 use App\Http\Requests\StorerequestHistoryRequest;
 use App\Http\Requests\StorewekaAccountsTransactionsRequest;
 use App\Http\Requests\UpdatewekaAccountsTransactionsRequest;
+use App\Helpers\PhoneHelper;
 
 class WekaAccountsTransactionsController extends Controller
 {
@@ -1020,10 +1021,19 @@ class WekaAccountsTransactionsController extends Controller
         $provider=$request['mobile_money_provider'] ?? null;
         $phone=$request['phone_number'] ?? null;
        
+        if(!$user){
+            return $this->errorResponse("Utilisateur non authentifié");
+        }
+
         if(!$phone){
             return $this->errorResponse("Vous devez fournir une numero de telephone");
-        }  
+        } 
         
+        if (!PhoneHelper::isValidPhone($phone)) {
+            return $this->errorResponse("Numéro invalide.");
+        }
+        
+        $country=PhoneHelper::getCountry($phone);
         if(!$currency){
             return $this->errorResponse("Vous devez fournir une devise");
         } 
@@ -1044,6 +1054,10 @@ class WekaAccountsTransactionsController extends Controller
 
         if(!$providerFind->isavailable()){
             return $this->errorResponse("Fournisseur désactivé");
+        }
+
+        if(!$country!==$providerFind->country){
+            return $this->errorResponse("Le numero n'est pas du pays configuré");
         }
 
         $memberAccount=wekamemberaccounts::findByMemberAndCurrency($user,$currency);

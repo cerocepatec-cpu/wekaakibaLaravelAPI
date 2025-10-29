@@ -132,6 +132,7 @@ Route::middleware(['auth:sanctum'])->group(function () {
         Route::resource('/request_history',RequestHistoryController::class);
         Route::post('/request_history/new',[RequestHistoryController::class,'store']);
         Route::post('/weka/transactions/new',[WekaAccountsTransactionsController::class,'store']);
+        Route::post('/weka/transactions/depositbymobilemoney',[WekaAccountsTransactionsController::class,'handleMobileMoneyAccount']);
     });
 
     /** Permissions et roles sensibles mais peut rester sans PIN */
