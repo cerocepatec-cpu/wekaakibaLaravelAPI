@@ -17,6 +17,7 @@
         "maatwebsite/excel": "3.1.40",
         "maennchen/zipstream-php": "2.1",
         "phpmailer/phpmailer": "^6.9",
+        "propaganistas/laravel-phone": "^4.4",
         "spatie/laravel-permission": "^6.21"
     },
     "require-dev": {
@@ -32,7 +33,10 @@
             "App\\": "app/",
             "Database\\Factories\\": "database/factories/",
             "Database\\Seeders\\": "database/seeders/"
-        }
+        },
+        "files": [
+            "app/Helpers/PhoneHelper.php"
+        ]
     },
     "autoload-dev": {
         "psr-4": {

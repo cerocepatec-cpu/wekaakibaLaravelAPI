@@ -1020,6 +1020,10 @@ class WekaAccountsTransactionsController extends Controller
         $provider=$request['mobile_money_provider'] ?? null;
         $phone=$request['phone_number'] ?? null;
        
+        if(!$phone){
+            return $this->errorResponse("Vous devez fournir une numero de telephone");
+        }  
+        
         if(!$currency){
             return $this->errorResponse("Vous devez fournir une devise");
         } 
@@ -1069,7 +1073,7 @@ class WekaAccountsTransactionsController extends Controller
                 null,
                 $user->full_name?$user->full_name:$user->user_name,
                 0,
-                $user->user_phone?? null,
+                $phone?? null,
                 $user->adress?? null
             );
             DB::commit();
