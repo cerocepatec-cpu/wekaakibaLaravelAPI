@@ -58,4 +58,14 @@ class wekamemberaccounts extends Model
     {
         return $this->belongsTo(moneys::class, 'money_id');
     }
+
+    public static function findByMemberAndCurrency($member, string $currency)
+    {
+        return self::where('user_id', $member->id)
+        ->whereHas('money', function ($query) use ($currency) {
+            $query->where('abreviation', strtoupper($currency));
+        })
+        ->first();
+    }
+
 }

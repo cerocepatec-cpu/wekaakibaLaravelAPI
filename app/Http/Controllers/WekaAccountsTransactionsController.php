@@ -999,9 +999,9 @@ class WekaAccountsTransactionsController extends Controller
                 case 'finance_withdrawal':
                     $this->financeWithdraw($request);
                     break; 
-                case 'mobile_money_account':
-                    $this->handleMobileMoneyAccount($request,$user);
-                    break;
+                // case 'mobile_money_account':
+                //     $this->handleMobileMoneyAccount($request,$user);
+                //     break;
                 default:
                 return $this->errorResponse("Type d'opération invalide");
             }
@@ -1012,93 +1012,72 @@ class WekaAccountsTransactionsController extends Controller
         }
     }
 
-    private function handleMobileMoneyAccount($request,$user){
+    public function handleMobileMoneyAccount(Request $request){
         $user=Auth::user();
         $amount=$request['amount'];
         $motif=$request['motif'];
         $currency=$request['currency'] ?? null;
-
+        $provider=$request['mobile_money_provider'] ?? null;
+        $phone=$request['phone_number'] ?? null;
        
-        // if(!$currency){
-        //     return $this->errorResponse("Vous devez fournir une devise.");
-        // }
+        if(!$currency){
+            return $this->errorResponse("Vous devez fournir une devise");
+        } 
         
-        // if(!$memberAccount){
-        //     return $this->errorResponse("Compte du membre introuvable");
-        // }
+        if(!$amount || $amount<=0){
+            return $this->errorResponse("Vous devez fournir un montant svp");
+        } 
+        
+        if(!$provider){
+            return $this->errorResponse("Vous devez fournir un fournisseur");
+        }
 
-        // if(!$memberAccount->isavailable()){
-        //     return $this->errorResponse("Compte du membre désactivé");
-        // }
+        $providerFind=MobileMoneyProviders::find($provider);
+        
+        if(!$providerFind){
+            return $this->errorResponse("Fournisseur introuvable");
+        }
 
-        // if (!$request->filled('fund_id')) {
-        //     return $this->errorResponse("Identifiant de la caisse requis");
-        // }
+        if(!$providerFind->isavailable()){
+            return $this->errorResponse("Fournisseur désactivé");
+        }
 
-        // $fund =funds::find($request['fund_id']);
-        // if (!$fund) {
-        //     return $this->errorResponse("caisse introuvable");
-        // } 
-            
-        // if (!$fund->isavailable()) {
-        //     return $this->errorResponse("caisse désactivée!");
-        // }
+        $memberAccount=wekamemberaccounts::findByMemberAndCurrency($user,$currency);
+        if(!$memberAccount){
+            return $this->errorResponse("Compte du membre introuvable");
+        }
 
-        // if(!$fund->canMakeOperation($user)){
-        //     return $this->errorResponse("Vous n'êtes pas autorisé à effectuer des opérations sur cette caisse.");
-        // }
+        if(!$memberAccount->isavailable()){
+            return $this->errorResponse("Compte du membre désactivé");
+        }
 
-        // if(!$fund->haveTheSameMoneyWith($memberAccount->money_id)){
-        //     return $this->errorResponse("la caisse et le compte n'ont pas la même monnaie.");
-        // }
-
-        // try{
-        //     DB::beginTransaction();
-        //     $fund->sold = $fund->sold + $amount;
-        //     $fund->save();
-        //     $makeHistory=$this->createLocalRequestHistory(
-        //         $user->id,
-        //         $fund->id,
-        //         $amount,
-        //         $motif,
-        //         'entry',
-        //         null,
-        //         null,
-        //         null,
-        //         $fund->sold,
-        //         null,
-        //         $user->full_name??$user->user_name,
-        //         $fund->description,
-        //         null,
-        //         null,
-        //         $memberAccount->id,
-        //         'approvment'
-        //     );
-        //     $memberAccountSoldBefore=$memberAccount->sold;
-        //     $memberAccount->sold=$memberAccount->sold+$amount;
-        //     $memberAccountSoldAfter=$memberAccount->sold;
-        //     $memberAccount->save();
-        //     $transaction=$this->createTransaction(
-        //         $amount,
-        //         $memberAccountSoldBefore,
-        //         $memberAccountSoldAfter,
-        //         "entry",
-        //         $motif,
-        //         $user->id,
-        //         $memberAccount->id,
-        //         $memberAccount->user_id,
-        //         null,
-        //         $user->full_name?$user->full_name:$user->user_name,
-        //         0,
-        //         $user->user_phone?? null,
-        //         $user->adress?? null
-        //     );
-        //     DB::commit();
-        //     return $this->successResponse('success',$this->show($transaction));
-        // }catch (\Exception $e){
-        //     DB::rollBack();
-        //     return $this->errorResponse($e->getMessage(), 500);
-        // }
+        try{
+            DB::beginTransaction();
+            $memberAccountSoldBefore=$memberAccount->sold;
+            $memberAccount->sold=$memberAccount->sold+$amount;
+            $memberAccountSoldAfter=$memberAccount->sold;
+            $memberAccount->save();
+            $transaction=$this->createTransaction(
+                $amount,
+                $memberAccountSoldBefore,
+                $memberAccountSoldAfter,
+                "entry",
+                $motif,
+                $user->id,
+                $memberAccount->id,
+                $memberAccount->user_id,
+                null,
+                $user->full_name?$user->full_name:$user->user_name,
+                0,
+                $user->user_phone?? null,
+                $user->adress?? null
+            );
+            DB::commit();
+            return $this->successResponse('success',$this->show($transaction));
+        }catch (\Exception $e){
+            DB::rollBack();
+            return $this->errorResponse($e->getMessage(), 500);
+        }
     }
 
     private function handleDeposit($request, $memberAccount, $user)
