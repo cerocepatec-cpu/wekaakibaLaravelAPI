@@ -12,7 +12,6 @@ class Roles extends Model
         'title',
         'name',
         'description',
-        'permissions',
         'user_id',
         'enterprise_id',
         'guard_name'

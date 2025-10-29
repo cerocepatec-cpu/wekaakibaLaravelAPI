@@ -940,6 +940,10 @@ class WekaAccountsTransactionsController extends Controller
             $user = $request->user();
             if (!$user) {
                 return $this->errorResponse("Utilisateur non authentifié", 401);
+            } 
+            
+            if ($user->status!=="enabled") {
+                return $this->errorResponse("Vous êtes bloqué(e). Veuillez contacter votre administrateur système.", 401);
             }
 
             $accountId =$request['member_account_id'] ?? null;
@@ -996,6 +1000,7 @@ class WekaAccountsTransactionsController extends Controller
                     $this->financeWithdraw($request);
                     break; 
                 case 'mobile_money_account':
+                    $this->handleMobileMoneyAccount($request,$user);
                     break;
                 default:
                 return $this->errorResponse("Type d'opération invalide");
@@ -1007,6 +1012,94 @@ class WekaAccountsTransactionsController extends Controller
         }
     }
 
+    private function handleMobileMoneyAccount($request,$user){
+        $user=Auth::user();
+        $amount=$request['amount'];
+        $motif=$request['motif'];
+        $currency=$request['currency'] ?? null;
+
+       
+        // if(!$currency){
+        //     return $this->errorResponse("Vous devez fournir une devise.");
+        // }
+        
+        // if(!$memberAccount){
+        //     return $this->errorResponse("Compte du membre introuvable");
+        // }
+
+        // if(!$memberAccount->isavailable()){
+        //     return $this->errorResponse("Compte du membre désactivé");
+        // }
+
+        // if (!$request->filled('fund_id')) {
+        //     return $this->errorResponse("Identifiant de la caisse requis");
+        // }
+
+        // $fund =funds::find($request['fund_id']);
+        // if (!$fund) {
+        //     return $this->errorResponse("caisse introuvable");
+        // } 
+            
+        // if (!$fund->isavailable()) {
+        //     return $this->errorResponse("caisse désactivée!");
+        // }
+
+        // if(!$fund->canMakeOperation($user)){
+        //     return $this->errorResponse("Vous n'êtes pas autorisé à effectuer des opérations sur cette caisse.");
+        // }
+
+        // if(!$fund->haveTheSameMoneyWith($memberAccount->money_id)){
+        //     return $this->errorResponse("la caisse et le compte n'ont pas la même monnaie.");
+        // }
+
+        // try{
+        //     DB::beginTransaction();
+        //     $fund->sold = $fund->sold + $amount;
+        //     $fund->save();
+        //     $makeHistory=$this->createLocalRequestHistory(
+        //         $user->id,
+        //         $fund->id,
+        //         $amount,
+        //         $motif,
+        //         'entry',
+        //         null,
+        //         null,
+        //         null,
+        //         $fund->sold,
+        //         null,
+        //         $user->full_name??$user->user_name,
+        //         $fund->description,
+        //         null,
+        //         null,
+        //         $memberAccount->id,
+        //         'approvment'
+        //     );
+        //     $memberAccountSoldBefore=$memberAccount->sold;
+        //     $memberAccount->sold=$memberAccount->sold+$amount;
+        //     $memberAccountSoldAfter=$memberAccount->sold;
+        //     $memberAccount->save();
+        //     $transaction=$this->createTransaction(
+        //         $amount,
+        //         $memberAccountSoldBefore,
+        //         $memberAccountSoldAfter,
+        //         "entry",
+        //         $motif,
+        //         $user->id,
+        //         $memberAccount->id,
+        //         $memberAccount->user_id,
+        //         null,
+        //         $user->full_name?$user->full_name:$user->user_name,
+        //         0,
+        //         $user->user_phone?? null,
+        //         $user->adress?? null
+        //     );
+        //     DB::commit();
+        //     return $this->successResponse('success',$this->show($transaction));
+        // }catch (\Exception $e){
+        //     DB::rollBack();
+        //     return $this->errorResponse($e->getMessage(), 500);
+        // }
+    }
 
     private function handleDeposit($request, $memberAccount, $user)
     {
@@ -1021,11 +1114,6 @@ class WekaAccountsTransactionsController extends Controller
                 return $this->errorResponse("UUID déjà utilisé");
             }
 
-            // // Mise à jour du solde
-            // $memberAccount->sold = $memberAccount->sold + $request['amount'];
-            // if ($request['transaction_status'] === 'validated') {
-            //     $memberAccount->save();
-            // }
 
             $nature = $request->input('nature');
             if (empty($nature) || $nature === 'null') {

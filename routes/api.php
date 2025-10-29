@@ -118,7 +118,7 @@ Route::middleware(['auth:sanctum'])->group(function () {
     /** Non-sensibles ou lecture simple */
     Route::post('/logout', [AuthController::class, 'logout']);
     Route::get('/me', [AuthController::class,'me']);
-    Route::get('roles', [RolePermissionController::class, 'indexRoles']);
+    Route::get('/roles', [RolePermissionController::class, 'indexRoles']);
     Route::get('permissions', [RolePermissionController::class, 'indexPermissions']);
     Route::get('users', [RolePermissionController::class, 'indexUsers']);
     Route::get('/funds/mines/{id}', [FundsController::class,'mines']);
@@ -136,10 +136,12 @@ Route::middleware(['auth:sanctum'])->group(function () {
 
     /** Permissions et roles sensibles mais peut rester sans PIN */
     Route::post('user/{user}/assign-role', [RolePermissionController::class, 'assignRole']);
-    Route::post('user/{user}/assign-permissions', [RolePermissionController::class, 'assignPermissions']);
+    Route::post('/roles/new', [RolePermissionController::class, 'store']);
     Route::post('/assign-role', [PermissionController::class, 'assignRole']);
-    Route::post('/give-permission', [PermissionController::class, 'givePermission']);
+    Route::post('/give-permission', [PermissionController::class, 'givePermissions']);
     Route::post('/check-permission', [PermissionController::class, 'checkPermission']);
+    Route::get('/permissions/grouped', [PermissionController::class, 'groupedPermissions']);
+    Route::post('/users/{userId}/permissions', [PermissionController::class, 'assignPermissions']);
 
     /** Users CRUD */
     Route::ApiResource('/users',UsersController::class);
@@ -157,6 +159,7 @@ Route::middleware(['auth:sanctum'])->group(function () {
     Route::post('/funds/savemultiples',[RequestHistoryController::class,'savemultiple']);
     Route::post('/expenditures/doneby',[ExpendituresController::class,'doneby']);
     Route::get('/weka/transactionspaginated',[WekaAccountsTransactionsController::class,'getTransactionslistByUser']);
+    Route::get('/weka/mobilemoneyproviders/enterprise/{id}',[MobileMoneyProvidersController::class,'index']);
 });
 
 
@@ -954,7 +957,6 @@ Route::get('/clear-laravel-cache', function () {
 // /**
 //  * WEKA WITHDRAWL METHODS
 //  */
-// Route::get('/weka/mobilemoneyproviders/enterprise/{id}',[MobileMoneyProvidersController::class,'index']);
 // Route::get('/weka/withdrawals/enterprise/{memberid}',[WekaWithdrawMethodsController::class,'index']);
 // Route::post('/weka/transactionResumeBeforeValidate',[WekaAccountsTransactionsController::class,'transactionResumeBeforeValidate']);
 
