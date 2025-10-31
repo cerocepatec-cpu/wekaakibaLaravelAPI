@@ -136,13 +136,19 @@ Route::middleware(['auth:sanctum'])->group(function () {
     });
 
     /** Permissions et roles sensibles mais peut rester sans PIN */
-    Route::post('user/{user}/assign-role', [RolePermissionController::class, 'assignRole']);
+    Route::post('/user/assign-role', [RolePermissionController::class, 'assignRole']);
     Route::post('/roles/new', [RolePermissionController::class, 'store']);
+    Route::post('/roles/{role}/permissions/toggle', [RolePermissionController::class, 'toggleRolePermission']);
+    Route::get('/roles/{roleId}/users', [RolePermissionController::class, 'getRoleUsers']);
+    Route::post('/roles/remove-from-users', [RolePermissionController::class, 'removeRoleFromUsers']);
+
     Route::post('/assign-role', [PermissionController::class, 'assignRole']);
     Route::post('/give-permission', [PermissionController::class, 'givePermissions']);
     Route::post('/check-permission', [PermissionController::class, 'checkPermission']);
     Route::get('/permissions/grouped', [PermissionController::class, 'groupedPermissions']);
     Route::post('/users/{userId}/permissions', [PermissionController::class, 'assignPermissions']);
+    Route::post('/permissions/users/remove', [PermissionController::class, 'removeUsersFromPermission']);
+    Route::get('/permissions/users', [PermissionController::class, 'getPermissionUsers']);
 
     /** Users CRUD */
     Route::ApiResource('/users',UsersController::class);

@@ -18,6 +18,7 @@ class User extends Authenticatable implements CanResetPassword
      * Champs remplissables
      */
     protected $fillable = [
+        'name',
         'user_name',
         'email',
         'email_verified_at',
@@ -62,19 +63,9 @@ class User extends Authenticatable implements CanResetPassword
      */
     protected $appends = ['pin_set', 'weak_pin'];
 
-    // =====================================================
-    // 🔐 ATTRIBUTS DÉRIVÉS : DÉTECTION DU PIN
-    // =====================================================
-
-    /**
-     * Indique si l’utilisateur a un PIN configuré
-     */
     public function getPinSetAttribute(): bool
     {
         $pin = $this->attributes['pin'] ?? null;
-
-        // Un hash bcrypt fait généralement 60 caractères
-        // Si c’est vide ou trop court, PIN non configuré
         return !empty($pin) && strlen($pin) > 20;
     }
 
@@ -85,19 +76,11 @@ class User extends Authenticatable implements CanResetPassword
     {
         $pin = $this->attributes['pin'] ?? null;
 
-        // Si pas de PIN, pas de faiblesse à signaler
         if (empty($pin)) {
             return false;
         }
-
-        // Si le PIN semble stocké en clair (ex: "0000" ou "1234")
-        // → la longueur du champ est trop courte pour un hash bcrypt
         return strlen($pin) < 30;
     }
-
-    // =====================================================
-    // 🔗 RELATIONS
-    // =====================================================
 
     public function tokens()
     {
@@ -154,13 +137,23 @@ class User extends Authenticatable implements CanResetPassword
         return collect($this->attributesToArray())->only($selectedFields);
     }
 
-    // =====================================================
-    // ⚙️ MÉTHODES AUTH
-    // =====================================================
+    public function getNameAttribute() {
+        return $this->full_name ?? $this->user_name;
+    }
 
-    public function getAuthIdentifierName()
+     protected static function booted()
     {
-        return 'user_name';
+        static::saving(function ($user) {
+            // Si name est vide mais full_name existe → copier
+            if (empty($user->name) && !empty($user->full_name)) {
+                $user->name = $user->full_name;
+            }
+
+            // Si full_name est vide mais name existe → copier aussi
+            if (empty($user->full_name) && !empty($user->name)) {
+                $user->full_name = $user->name;
+            }
+        });
     }
 
     public function getEmailForPasswordReset()
