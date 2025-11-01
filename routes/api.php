@@ -149,6 +149,7 @@ Route::middleware(['auth:sanctum'])->group(function () {
     Route::post('/users/{userId}/permissions', [PermissionController::class, 'assignPermissions']);
     Route::post('/permissions/users/remove', [PermissionController::class, 'removeUsersFromPermission']);
     Route::get('/permissions/users', [PermissionController::class, 'getPermissionUsers']);
+    Route::get('/permissons/foruser/{userId}',[PermissionController::class,'groupedPermissionsWithUser']);
 
     /** Users CRUD */
     Route::ApiResource('/users',UsersController::class);

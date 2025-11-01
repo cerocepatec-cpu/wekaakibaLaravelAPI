@@ -30,7 +30,7 @@ class PermissionController extends Controller
         $authUser = Auth::user();
         $adminEse = $this->getEse($authUser->id);
 
-        DB::beginTransaction(); // BEGIN TRANSACTION
+        DB::beginTransaction();
         try {
             $users = User::whereIn('id', $request->users)
                 ->where('status','enabled')
@@ -67,7 +67,7 @@ class PermissionController extends Controller
                 }
             }
 
-            DB::commit(); // COMMIT TRANSACTION
+            DB::commit();
 
             return response()->json([
                 'success' => $success,
@@ -91,24 +91,41 @@ class PermissionController extends Controller
         ]);
     }
 
-    public function groupedPermissionsWithUser($userId)
-    {
-        $permissions = Permission::all()->pluck('name')->toArray();
-        $user = User::findOrFail($userId);
-        $userPermissions = $user->getPermissionNames()->toArray();
+public function groupedPermissionsWithUser($userId = null)
+{
+    try {
+        // Vérifie si un ID est fourni
+        if (!$userId) {
+            return $this->errorResponse('Identifiant utilisateur requis', 400);
+        }
+
+        $user = User::find($userId);
+
+        if (!$user) {
+            return $this->errorResponse('Utilisateur introuvable', 404);
+        }
+
+        // Récupère toutes les permissions (directes + via rôle)
+        $userPermissions = $user->getAllPermissions()->pluck('name')->toArray();
 
         $grouped = [];
 
-        foreach ($permissions as $permission) {
-            [$prefix, $action] = explode('.', $permission);
-            $grouped[$prefix][] = [
-                'name' => $permission,
-                'assigned' => in_array($permission, $userPermissions)
-            ];
+        foreach ($userPermissions as $permission) {
+            if (strpos($permission, '.') !== false) {
+                [$prefix, $action] = explode('.', $permission, 2);
+            } else {
+                $prefix = 'others';
+            }
+
+            $grouped[$prefix][] = $permission;
         }
 
-        return response()->json($grouped);
+        return $this->successResponse("success",$grouped);
+    } catch (\Exception $e) {
+        return $this->errorResponse('Erreur lors de la récupération des permissions : ' . $e->getMessage(), 500);
     }
+}
+
 
     public function groupedPermissions()
     {
@@ -203,57 +220,132 @@ class PermissionController extends Controller
         }
     }
 
+    // public function removeUsersFromPermission(Request $request)
+    // {
+    //     $validated = $request->validate([
+    //         'user_ids' => 'required|array|min:1',
+    //         'user_ids.*' => 'integer|exists:users,id',
+    //         'module' => 'required|string',
+    //         'permissions' => 'required|array|min:1',
+    //         'permissions.*' => 'string'
+    //     ]);
+
+    //     try {
+    //         $userIds = $validated['user_ids'];
+    //         $permissions = $validated['permissions'];
+
+    //         $affectedCount = 0;
+    //         $errors = [];
+
+    //         foreach ($userIds as $userId) {
+    //             $user = User::find($userId);
+    //             if (!$user) {
+    //                 $errors[] = "Utilisateur ID $userId introuvable.";
+    //                 continue;
+    //             }
+
+    //             // Retirer les permissions liées au module
+    //             foreach ($permissions as $perm) {
+    //                 if ($user->hasPermissionTo($perm)) {
+    //                     $user->revokePermissionTo($perm);
+    //                     $affectedCount++;
+    //                 }
+    //             }
+
+    //             // Optionnel : si tu veux retirer un rôle du module aussi
+    //             $roleName = ucfirst($validated['module']);
+    //             if ($user->hasRole($roleName)) {
+    //                 $user->removeRole($roleName);
+    //             }
+    //         }
+
+    //         return response()->json([
+    //             'status' => 'success',
+    //             'message' => "Suppression terminée.",
+    //             'total_users' => count($userIds),
+    //             'affected_permissions' => $affectedCount,
+    //             'errors' => $errors,
+    //         ], 200);
+    //     } catch (\Exception $e) {
+    //         return response()->json([
+    //             'status' => 'error',
+    //             'message' => $e->getMessage(),
+    //         ], 500);
+    //     }
+    // }
     public function removeUsersFromPermission(Request $request)
     {
-        $validated = $request->validate([
-            'user_ids' => 'required|array|min:1',
-            'user_ids.*' => 'integer|exists:users,id',
-            'module' => 'required|string',
-            'permissions' => 'required|array|min:1',
-            'permissions.*' => 'string'
-        ]);
-
         try {
+            // Validation initiale : seuls user_ids sont obligatoires
+            $validated = $request->validate([
+                'user_ids' => 'required|array|min:1',
+                'user_ids.*' => 'integer|exists:users,id',
+                'module' => 'nullable|string',
+                'permissions' => 'nullable|array',
+                'permissions.*' => 'string'
+            ]);
+
             $userIds = $validated['user_ids'];
-            $permissions = $validated['permissions'];
+            $module = $validated['module'] ?? null;
+            $permissions = $validated['permissions'] ?? null;
+
+            // Si module ET permissions sont absents → erreur claire
+            if (empty($module) && empty($permissions)) {
+                return $this->errorResponse(
+                    "Vous devez spécifier soit un module, soit une liste de permissions à supprimer.",
+                    400
+                );
+            }
 
             $affectedCount = 0;
             $errors = [];
 
             foreach ($userIds as $userId) {
-                $user = User::find($userId);
-                if (!$user) {
-                    $errors[] = "Utilisateur ID $userId introuvable.";
-                    continue;
-                }
+    $user = User::find($userId);
+    if (!$user) {
+        $errors[] = "Utilisateur ID {$userId} introuvable.";
+        continue;
+    }
 
-                // Retirer les permissions liées au module
-                foreach ($permissions as $perm) {
-                    if ($user->hasPermissionTo($perm)) {
-                        $user->revokePermissionTo($perm);
-                        $affectedCount++;
-                    }
-                }
-
-                // Optionnel : si tu veux retirer un rôle du module aussi
-                $roleName = ucfirst($validated['module']);
-                if ($user->hasRole($roleName)) {
-                    $user->removeRole($roleName);
-                }
+    // Supprimer les permissions directes
+    if (!empty($permissions)) {
+        foreach ($permissions as $perm) {
+            if ($user->hasDirectPermission($perm)) {
+                $user->revokePermissionTo($perm);
+                $affectedCount++;
             }
 
-            return response()->json([
-                'status' => 'success',
-                'message' => "Suppression terminée.",
+            // Supprimer la permission héritée via rôle
+            foreach ($user->roles as $role) {
+                if ($role->hasPermissionTo($perm)) {
+                    $user->removeRole($role->name); // removeRole attend un string ou Role object
+                    $affectedCount++;
+                }
+            }
+        }
+    }
+
+    // Si module est spécifié, retirer le rôle correspondant
+    if (!empty($module)) {
+        $roleName = ucfirst($module);
+        if ($user->hasRole($roleName)) {
+            $user->removeRole($roleName);
+        }
+    }
+}
+
+
+            return $this->successResponse('success',[
                 'total_users' => count($userIds),
                 'affected_permissions' => $affectedCount,
                 'errors' => $errors,
-            ], 200);
+            ]);
+
         } catch (\Exception $e) {
-            return response()->json([
-                'status' => 'error',
-                'message' => $e->getMessage(),
-            ], 500);
+            return $this->errorResponse(
+                'Erreur lors de la suppression des permissions : ' . $e->getMessage(),
+                500
+            );
         }
     }
 
