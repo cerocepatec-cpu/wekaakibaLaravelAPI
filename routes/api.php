@@ -96,6 +96,7 @@ use App\Http\Controllers\CategoriesServicesControllerController;
 use App\Http\Controllers\RolePermissionController;
 use App\Http\Controllers\AuthController;
 use App\Http\Controllers\PermissionController;
+use Illuminate\Support\Facades\Auth;
 
 /*
 |--------------------------------------------------------------------------
@@ -107,12 +108,24 @@ use App\Http\Controllers\PermissionController;
 | is assigned the "api" middleware group. Enjoy building your API!
 |
 */
+Route::get('/test-guard', function() {
+    $user = Auth::user();
+    return method_exists($user, 'can');
+});
 Route::post('register', [AuthController::class, 'register']);
 Route::post('login',    [AuthController::class, 'login']);
 Route::post('/refresh', [AuthController::class, 'refresh']);
 Route::post('/password/forgot', [AuthController::class, 'forgotPassword']);
 Route::post('/password/verify', [AuthController::class, 'verifyResetCode']);
 Route::post('/password/reset', [AuthController::class, 'resetPassword']);
+
+Route::middleware(['auth:sanctum', 'permission:agents.add'])->post('/weka/members/newmember', [UsersController::class, 'newwekamember']);
+Route::middleware(['auth:sanctum', 'permission:agents.edit'])->group(function () {
+    Route::put('/weka/members/update/{id}',[UsersController::class,'updatewekamember']);
+    Route::post('/weka/users/changeaccess/',[UsersController::class,'changeaccess']);
+    Route::post('/users/updatestatus',[UsersController::class,'changerStatus']);
+    Route::post('/weka/member/updatecollectionpercentage',[UsersController::class,'updatecollectionpercentage']);
+}); 
 
 Route::middleware(['auth:sanctum'])->group(function () {
     /** Non-sensibles ou lecture simple */
@@ -150,6 +163,7 @@ Route::middleware(['auth:sanctum'])->group(function () {
     Route::post('/permissions/users/remove', [PermissionController::class, 'removeUsersFromPermission']);
     Route::get('/permissions/users', [PermissionController::class, 'getPermissionUsers']);
     Route::get('/permissons/foruser/{userId}',[PermissionController::class,'groupedPermissionsWithUser']);
+    Route::get('/permissons/ungrouped/foruser/{userId}',[PermissionController::class,'ungroupedPermissionsForUser']);
 
     /** Users CRUD */
     Route::ApiResource('/users',UsersController::class);
@@ -846,7 +860,6 @@ Route::get('/clear-laravel-cache', function () {
 // /**
 //  * API WEKA AKIBA END-POINTS
 //  */
-// Route::post('/weka/users/changeaccess/',[UsersController::class,'changeaccess']);
 // Route::put('/weka/membersaccount/update/{id}',[WekamemberaccountsController::class,'update']);
 // Route::get('/weka/member/accounts/{id}',[WekamemberaccountsController::class,'membersaccounts']);
 // Route::post('/weka/newaccount',[WekamemberaccountsController::class,'store']);
@@ -857,7 +870,6 @@ Route::get('/clear-laravel-cache', function () {
 // Route::post('/weka/removesponsoring',[UsersController::class,'removesponsoring']);
 // Route::get('/weka/memberspaginated/{enterpriseid}',[UsersController::class,'wekamemberslistpaginated']);
 // Route::get('/weka/members-to-validated/enterprise/{id}',[UsersController::class,'wekamemberstovalidate']);
-// Route::post('/weka/member/updatecollectionpercentage',[UsersController::class,'updatecollectionpercentage']);
 // Route::post('/weka/accounts/newtranfert',[WekatransfertsaccountsController::class,'store']);
 // Route::get('/weka/account/transferts/history',[WekatransfertsaccountsController::class,'getTransfersList']);
 // Route::post('/weka/financedashboard/{userid}' ,[UsersController::class,'wekafinancedashboard']);
@@ -871,8 +883,6 @@ Route::get('/clear-laravel-cache', function () {
 // Route::post('/weka/transactions/excelexport', [WekaAccountsTransactionsController::class, 'exportTransactionsExcel']);
 // Route::post('/weka/transactions/pdfexport', [WekaAccountsTransactionsController::class, 'exportTransactionsPdf']);
 // Route::post('/weka/transactions/validateimputation', [WekaAccountsTransactionsController::class, 'validateimputation']);
-// Route::post('/weka/members/newmember',[UsersController::class,'newwekamember']);
-// Route::put('/weka/members/update/{id}',[UsersController::class,'updatewekamember']);
 // Route::post('/weka/firstentries',[WekafirstentriesController::class,'index']);
 // Route::post('/weka/firstentries/new',[WekafirstentriesController::class,'store']);
 // Route::post('/weka/firstentries/delete',[WekafirstentriesController::class,'destroy']);

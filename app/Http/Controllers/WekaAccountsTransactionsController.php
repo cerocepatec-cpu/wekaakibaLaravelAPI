@@ -1029,7 +1029,7 @@ class WekaAccountsTransactionsController extends Controller
             return $this->errorResponse("Vous devez fournir une numero de telephone");
         } 
         
-        if (!PhoneHelper::isValidPhone($phone)) {
+        if (!PhoneHelper::isValidPhone($phone,"CD")) {
             return $this->errorResponse("Numéro invalide.");
         }
         

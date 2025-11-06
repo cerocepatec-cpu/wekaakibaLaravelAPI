@@ -62,6 +62,7 @@ class User extends Authenticatable implements CanResetPassword
      * Attributs calculés ajoutés automatiquement à JSON
      */
     protected $appends = ['pin_set', 'weak_pin'];
+    protected $guard_name = 'sanctum';
 
     public function getPinSetAttribute(): bool
     {
@@ -131,33 +132,41 @@ class User extends Authenticatable implements CanResetPassword
 
     public function getSelectedFields(array $fields = [])
     {
-        $defaultFields = ['id', 'user_name', 'full_name', 'user_mail', 'user_phone', 'status', 'uuid', 'avatar', 'user_type'];
+        $defaultFields = ['id', 'user_name','name', 'full_name','email', 'user_mail', 'user_phone', 'status', 'uuid', 'avatar', 'user_type'];
         $selectedFields = array_unique(array_merge($defaultFields, $fields));
-
         return collect($this->attributesToArray())->only($selectedFields);
     }
 
-    public function getNameAttribute() {
-        return $this->full_name ?? $this->user_name;
-    }
+    // public function getNameAttribute() {
+    //     return $this->full_name ?? $this->user_name;
+    // }
 
-     protected static function booted()
-    {
-        static::saving(function ($user) {
-            // Si name est vide mais full_name existe → copier
-            if (empty($user->name) && !empty($user->full_name)) {
-                $user->name = $user->full_name;
-            }
+    //  protected static function booted()
+    // {
+    //     static::saving(function ($user) {
+    //         // Si name est vide mais full_name existe → copier
+    //         if (empty($user->name) && !empty($user->full_name)) {
+    //             $user->name = $user->full_name;
+    //         }
 
-            // Si full_name est vide mais name existe → copier aussi
-            if (empty($user->full_name) && !empty($user->name)) {
-                $user->full_name = $user->name;
-            }
-        });
-    }
+    //         // Si full_name est vide mais name existe → copier aussi
+    //         if (empty($user->full_name) && !empty($user->name)) {
+    //             $user->full_name = $user->name;
+    //         }
+    //     });
+    // }
 
     public function getEmailForPasswordReset()
     {
         return $this->email;
     }
+
+     public function isavailable(): bool
+    {
+        if ($this->status !=='enabled') {
+            return false;
+        }else{
+            return true;
+        }
+    }  
 }

@@ -12,12 +12,15 @@ use App\Models\moneys;
 use App\Models\Accounts;
 use App\Models\Cautions;
 use App\Models\Invoices;
+use Illuminate\Support\Str;
+use App\Helpers\PhoneHelper;
 use App\Models\DebtPayments;
 use App\Models\Expenditures;
 use App\Models\OtherEntries;
 use Illuminate\Http\Request;
 use App\Models\DepositsUsers;
 use App\Models\passwordreset;
+use App\Services\MailService;
 use App\Models\usersenterprise;
 use App\Models\money_conversion;
 use App\Models\wekafirstentries;
@@ -27,11 +30,11 @@ use App\Models\CustomerController;
 use App\Models\wekamemberaccounts;
 use Illuminate\Support\Facades\DB;
 use PHPMailer\PHPMailer\Exception;
+use Illuminate\Support\Facades\Auth;
+use Illuminate\Support\Facades\Hash;
 use App\Models\customerspointshistory;
 use App\Models\wekaAccountsTransactions;
-use App\Services\MailService;
-use Illuminate\Support\Str;
-use Illuminate\Support\Facades\Hash;
+use App\Helpers\EmailChecker;
 
 class UsersController extends Controller
 {
@@ -79,9 +82,18 @@ class UsersController extends Controller
         }
     }
 
-
+    /** @var User $user */
     public function index($enterprise_id)
     {
+        $user=Auth::user();
+        if(!$user){
+            return $this->errorResponse("Utilisateur non connecté");
+        }
+
+        if(!$user->can('agents.view')){
+           return $this->errorResponse("Action non autorisée"); 
+        }
+
         $list=collect(usersenterprise::join('users','usersenterprises.id','=','users.id')
         ->where('enterprise_id','=',$enterprise_id)->where('users.user_type','<>','member')->get(['usersenterprises.*']));
         $listdata=$list->map(function ($item){
@@ -279,7 +291,7 @@ class UsersController extends Controller
                     ->orWhere('user_type', 'LIKE', "%$searchTerm%")
                     ->orWhere('status', 'LIKE', "%$searchTerm%")
                     ->orWhere('note', 'LIKE', "%$searchTerm%")
-                    ->orWhere('full_name', 'LIKE', "%$searchTerm%")
+                    ->orWhere('name', 'LIKE', "%$searchTerm%")
                     ->orWhere('uuid', 'LIKE', "%$searchTerm%");
                 })
                 ->select('users.*')
@@ -1701,6 +1713,7 @@ public function store(Request $request)
      */
     public function show(User $user)
     {
+
         $usersent=User::leftjoin('usersenterprises as E', 'users.id','=','E.user_id')
         ->where('users.id','=',$user->id)
         ->get(['users.*','E.enterprise_id'])->first();
@@ -1820,10 +1833,49 @@ public function store(Request $request)
     
     public function updatewekamember(Request $request, $id)
     {
+         $request->validate([
+            'name' => 'required|string|min:4',
+            'user_phone' => 'required|string'
+        ]);
+
+        if (!PhoneHelper::isValidPhoneNumber($request['user_phone'],"CD")) {
+            return $this->errorResponse("Numéro de téléphone invalide.");
+        }
+
+        $actualuser=Auth::user();
+        
+        if(!$actualuser){
+            return response()->json([
+                "status"=>402,
+                "message"=>"error",
+                "error"=>"Authentification requise pour effectuer cette action.",
+                "data"=>null
+            ]);
+        }
+
+         if(!(User::find($actualuser->id))->isavailable()){
+             return response()->json([
+                "status"=>402,
+                "message"=>"error",
+                "error"=>"Votre compte est désactivé!",
+                "data"=>null
+            ]);
+        }
+
+        $actualese=$this->getEse($actualuser->id);
+        if(!$actualese){
+            return response()->json([
+                "status"=>402,
+                "message"=>"error",
+                "error"=>"Vous n'êtes affecté à aucune entreprise.",
+                "data"=>null
+            ]);
+        }
+
         $user=User::find($id);
         $user->update($request->all());
 
-       return $this->showweka($user);
+       return $this->successResponse('success',$this->showweka($user));
     } 
     
     public function changerStatus(Request $request)
@@ -2007,146 +2059,92 @@ public function store(Request $request)
         }    
     }
 
- /**
- * collectors login method
- */
-    // public function collectorslogin(Request $request)
-    // {
-    //      try {
-    //         // Récupération des identifiants
-    //         $username = $request->input('user_name');
-    //         $password = $request->input('user_password');
-
-    //         // Vérifie que l'utilisateur existe
-    //         $user = User::findByIdentifier($username);
-
-    //         if (!$user) {
-    //             return $this->errorResponse("any user find",401);
-    //         }
-            
-    //         if (!$user->collector) {
-    //             return $this->errorResponse("access denied",401);
-    //         }
-
-    //         // Vérifie le mot de passe
-    //         if ($password !== $user->user_password) {
-    //             return $this->errorResponse("password incorrect",401);
-    //         } 
-            
-    //         // Vérifie si le compte est actif
-    //         if ($user->status!=='enabled') {
-    //             return $this->errorResponse("account disabled",401);
-    //         }
-
-    //         // Vérifie l'accès mobile
-    //         if (!$user->mobile_access) {
-    //             return $this->errorResponse("mobile access denied",403);
-    //         }
-
-    //         // Vérifie que le user_type est bien "member"
-    //         if ($user->user_type !== 'member') {
-    //             return $this->errorResponse("back office access denied",403);
-    //         }
-
-    //         // Formatage du retour utilisateur
-    //         $userData = $request->input('rules_not_in_json_format')
-    //             ? $this->show($user)
-    //             : $this->showuser($user);
-
-    //         // Récupération de l'entreprise associée
-    //         $actualEse = $this->getEse($user->id);
-
-    //         if (!$actualEse) {
-    //            return $this->errorResponse("unknown enterprise",403);
-    //         }
-
-    //         // Ajout de l'ID entreprise dans le retour utilisateur
-    //         $userData['enterprise_id'] = $actualEse->id;
-
-    //         return response()->json([
-    //             "status" => 200,
-    //             "message" => "success",
-    //             "error" => null,
-    //             "user" => $userData,
-    //             "enterprise" => $actualEse,
-    //             "defaultmoney" => $this->defaultmoney($actualEse->id),
-    //         ]);
-
-    //     } catch (\Exception $e) {
-    //         return $this->errorResponse($e->getMessage(),500);
-    //     }    
-    // }
 
     public function collectorslogin(Request $request)
-{
-    try {
-        // Récupération des identifiants
-        $username = $request->input('user_name');
-        $password = $request->input('user_password');
+    {
+        try {
+            // Récupération des identifiants
+            $username = $request->input('user_name');
+            $password = $request->input('user_password');
 
-        // Recherche utilisateur via query standard
-        $user = User::where('user_name', $username)->first();
+            // Recherche utilisateur via query standard
+            $user = User::where('user_name', $username)->first();
 
-        if (!$user) {
-            return $this->errorResponse("any user found", 401);
+            if (!$user) {
+                return $this->errorResponse("any user found", 401);
+            }
+
+            if (!$user->collector) {
+                return $this->errorResponse("access denied", 401);
+            }
+
+            // Vérifie le mot de passe (attention : si mot de passe hashé, utiliser Hash::check)
+            if ($password !== $user->user_password) {
+                return $this->errorResponse("password incorrect", 401);
+            }
+
+            // Vérifie si le compte est actif
+            if ($user->status !== 'enabled') {
+                return $this->errorResponse("account disabled", 401);
+            }
+
+            // Vérifie l'accès mobile
+            if (!$user->mobile_access) {
+                return $this->errorResponse("mobile access denied", 403);
+            }
+
+            // Vérifie que le user_type est bien "member"
+            if ($user->user_type === 'member') {
+                return $this->errorResponse("back office access denied", 403);
+            }
+
+            // Formatage du retour utilisateur
+            $userData = $request->input('rules_not_in_json_format')
+                ? $this->show($user)
+                : $this->showuser($user);
+
+            // Récupération de l'entreprise associée
+            $actualEse = $this->getEse($user->id);
+            if (!$actualEse) {
+                return $this->errorResponse("unknown enterprise", 403);
+            }
+
+            // Ajout de l'ID entreprise dans le retour utilisateur
+            $userData['enterprise_id'] = $actualEse->id;
+
+            return response()->json([
+                "status" => 200,
+                "message" => "success",
+                "error" => null,
+                "user" => $userData,
+                "enterprise" => $actualEse,
+                "defaultmoney" => $this->defaultmoney($actualEse->id),
+            ]);
+
+        } catch (\Exception $e) {
+            return $this->errorResponse($e->getMessage(), 500);
         }
-
-        if (!$user->collector) {
-            return $this->errorResponse("access denied", 401);
-        }
-
-        // Vérifie le mot de passe (attention : si mot de passe hashé, utiliser Hash::check)
-        if ($password !== $user->user_password) {
-            return $this->errorResponse("password incorrect", 401);
-        }
-
-        // Vérifie si le compte est actif
-        if ($user->status !== 'enabled') {
-            return $this->errorResponse("account disabled", 401);
-        }
-
-        // Vérifie l'accès mobile
-        if (!$user->mobile_access) {
-            return $this->errorResponse("mobile access denied", 403);
-        }
-
-        // Vérifie que le user_type est bien "member"
-        if ($user->user_type === 'member') {
-            return $this->errorResponse("back office access denied", 403);
-        }
-
-        // Formatage du retour utilisateur
-        $userData = $request->input('rules_not_in_json_format')
-            ? $this->show($user)
-            : $this->showuser($user);
-
-        // Récupération de l'entreprise associée
-        $actualEse = $this->getEse($user->id);
-        if (!$actualEse) {
-            return $this->errorResponse("unknown enterprise", 403);
-        }
-
-        // Ajout de l'ID entreprise dans le retour utilisateur
-        $userData['enterprise_id'] = $actualEse->id;
-
-        return response()->json([
-            "status" => 200,
-            "message" => "success",
-            "error" => null,
-            "user" => $userData,
-            "enterprise" => $actualEse,
-            "defaultmoney" => $this->defaultmoney($actualEse->id),
-        ]);
-
-    } catch (\Exception $e) {
-        return $this->errorResponse($e->getMessage(), 500);
     }
-}
 
     /**
      * WEKA AKIBA METHODS
      */
      public function wekamemberslist($enterprise_id){
+        $user=Auth::user();
+        if (!$user) {
+            return response()->json([
+                'status' => 401,
+                'message' => 'Utilisateur non connecté'
+            ], 401);
+        }
+
+        if (!$user->can('agents.view')) {
+            return response()->json([
+                'status' => 403,
+                'message' => 'Action non autorisée'
+            ], 403);
+        }
+
         $list=usersenterprise::join('users','usersenterprises.user_id','users.id')
         ->where('usersenterprises.enterprise_id','=',$enterprise_id)
         ->where('users.user_type','=','member')
@@ -2160,7 +2158,6 @@ public function store(Request $request)
         return $listdata;
      } 
      
-
      /**
      * WEKA AKIBA members not sponsorized
      */
@@ -2171,12 +2168,12 @@ public function store(Request $request)
             ->whereNull('users.sponsored_by')
             ->select('users.*');
 
-        // Appliquer le filtre de recherche global sur user_name, full_name, uuid
+        // Appliquer le filtre de recherche global sur user_name, name, uuid
         if ($request->filled('keyword')) {
             $keyword = $request->keyword;
             $query->where(function ($q) use ($keyword) {
                 $q->where('users.user_name', 'like', '%' . $keyword . '%')
-                ->orWhere('users.full_name', 'like', '%' . $keyword . '%')
+                ->orWhere('users.name', 'like', '%' . $keyword . '%')
                 ->orWhere('users.uuid', 'like', '%' . $keyword . '%');
             });
         }
@@ -2236,7 +2233,7 @@ public function store(Request $request)
         if($request->keyword && !empty($request->keyword)){
             $list=collect(usersenterprise::join('users','usersenterprises.user_id','users.id')
             ->where('usersenterprises.enterprise_id','=',$request['enterprise_id'])
-            ->where('users.full_name','LIKE',"%$request->keyword%")
+            ->where('users.name','LIKE',"%$request->keyword%")
             ->orWhere('users.uuid','LIKE',"%$request->keyword%")
             ->orWhere('users.user_name','LIKE',"%$request->keyword%")
             ->limit(10)
@@ -2268,31 +2265,37 @@ public function store(Request $request)
                 $user=$this->showuser($user);
             }else{
                 $message='access denied';
+                return $this->errorResponse($message);
             }
 
-             return response()->json([
-                "status"=>200,
-                "message"=>$message,
-                "error"=>null,
-                'data'=>$user
-            ]);
+             return $this->successResponse($message,$user);
         } catch (Exception $e) {
-             return response()->json([
-                "status"=>500,
-                "message"=>"error",
-                "error"=>$e->getMessage(),
-                "data"=>null
-            ]); 
+             return $this->errorResponse($e->getMessage(),500); 
         } 
      }
      
    public function wekamemberslookup(Request $request)
     {
+         $user=Auth::user();
+        if (!$user) {
+            return response()->json([
+                'status' => 401,
+                'message' => 'Utilisateur non connecté'
+            ], 401);
+        }
+
+        if (!$user->can('agents.view')) {
+            return response()->json([
+                'status' => 403,
+                'message' => 'Vous n’avez pas les droits pour cette action'
+            ], 403);
+        }
+
         if ($request->filled('keyword')) {
             $query = usersenterprise::join('users', 'usersenterprises.user_id', '=', 'users.id')
                 ->where('usersenterprises.enterprise_id', $request->enterprise_id)
                 ->where(function ($q) use ($request) {
-                    $q->where('users.full_name', 'LIKE', "%{$request->keyword}%")
+                    $q->where('users.name', 'LIKE', "%{$request->keyword}%")
                     ->orWhere('users.uuid', 'LIKE', "%{$request->keyword}%")
                     ->orWhere('users.user_name', 'LIKE', "%{$request->keyword}%");
                 });
@@ -2365,7 +2368,7 @@ public function store(Request $request)
 
         $list=user::join('users','usersenterprises.user_id','users.id')
         ->where('enterprise_id','=',$request['enterpriseid'])
-        ->where('full_name','LIKE',"%$request->word%")
+        ->where('name','LIKE',"%$request->word%")
         ->orWhere('id','=',"$request->word")
         ->orWhere('uuid','LIKE',"%$request->word%")
         ->limit(20)->get('users.*');
@@ -2374,103 +2377,26 @@ public function store(Request $request)
      }
 
      public function newwekamember(Request $request){
+        $request->validate([
+            'name' => 'required|string|min:4',
+            'user_phone' => 'required|string',
+            'email' => 'nullable|string'
+        ]);
+
+        $email = $request->input('email');
+        
+        if (!PhoneHelper::isValidPhoneNumber($request['user_phone'],"CD")) {
+            return $this->errorResponse("Numéro de téléphone invalide.");
+        }
+
+        if($email && !EmailChecker::isValid($email)){
+          return $this->errorResponse("Adresse email invalide ou domaine inexistant.");
+        }
+
         $customerctrl= new CustomerControllerController();
-        $actualuser=$this->getinfosuser($request['created_by_id']);
-      
-        if($actualuser){
-            $actualese=$this->getEse($actualuser->id);
-            if($actualese){
-                 //test if exists new user
-            $ifexists = user::join('usersenterprises as E','users.id','E.user_id')
-            ->where('full_name','=',$request['full_name'])
-            ->where('E.enterprise_id',$actualese->id)->first();
-                if($ifexists){
-                    return response()->json([
-                        "status"=>500,
-                        "message"=>"error",
-                        "error"=>"duplicated member",
-                        "data"=>$ifexists
-                    ]); 
-                }else{
-                    try {
-                        $request['uuid']="GOM".date('Y').$this->EseNumberUsers($actualese->id);
-                        $request['user_name']="member".$this->EseNumberUsers($actualese->id);
-                        $request['user_password']="member".date('his').$this->EseNumberUsers($actualese->id);
-                        $request['status']="enabled";
-                        $newuser = user::create($request->all());
-                        if($newuser){
-                            usersenterprise::create([
-                                'user_id'=>$newuser->id,
-                                'enterprise_id'=>$actualese->id
-                            ]);
+        $actualuser=Auth::user();
         
-                            //create user as customer
-                            $ascustomer = CustomerController::create([
-                                    'created_by_id'=>$actualuser->id,
-                                    'customerName'=>$newuser->full_name,
-                                    'phone'=>$newuser->user_phone,
-                                    'mail'=>$newuser->user_mail,
-                                    'type'=>'physique',
-                                    'enterprise_id'=>$actualese->id,
-                                    'uuid'=>$newuser->uuid,
-                                    'member_id'=>$newuser->id
-                                ]);
-        
-                            $cdf=moneys::where('enterprise_id',$actualese->id)->where('abreviation','CDF')->first();
-                            $usd=moneys::where('enterprise_id',$actualese->id)->where('abreviation','USD')->first();
-        
-                            $cdfaccount=wekamemberaccounts::create([
-                                'sold'=>$request['soldecdf']?$request['soldecdf']:0,
-                                'description'=>'Compte '.$newuser->full_name.' CDF',
-                                'money_id'=>$cdf->id,
-                                'user_id'=>$newuser->id,
-                                'enterprise_id'=>$actualese->id,
-                                'account_number'=>"CP".date('Y').$this->EseNumberAccounts($actualese->id),
-                                'account_status'=>"enabled"
-                            ]);  
-                            
-                            $usdaccount=wekamemberaccounts::create([
-                                'sold'=>$request['soldeusd']?$request['soldeusd']:0,
-                                'description'=>'Compte '.$newuser->full_name.' USD',
-                                'money_id'=>$usd->id,
-                                'user_id'=>$newuser->id,
-                                'enterprise_id'=>$actualese->id,
-                                'account_number'=>"CP".date('Y').$this->EseNumberAccounts($actualese->id),
-                                'account_status'=>"enabled"
-                            ]);
-                        }
-
-                      if($request['returned'] && $request['returned']==='customer'){
-                        $datatoreturn=$customerctrl->show($ascustomer);
-                      }else{
-                        $datatoreturn=$this->showweka($newuser);
-                      }  
-                    return response()->json([
-                        "status"=>200,
-                        "message"=>"success",
-                        "error"=>null,
-                        "data"=>$datatoreturn
-                    ]);
-
-                } catch (Exception $e) {
-                    return response()->json([
-                        "status"=>500,
-                        "message"=>"error",
-                        "error"=>$e->getMessage(),
-                        "data"=>null
-                    ]); 
-                } 
-                }
-               
-            }else{
-                return response()->json([
-                    "status"=>402,
-                    "message"=>"error",
-                    "error"=>"unknown enterprise",
-                    "data"=>null
-                ]); 
-            }
-        }else{
+        if(!$actualuser){
             return response()->json([
                 "status"=>402,
                 "message"=>"error",
@@ -2478,7 +2404,108 @@ public function store(Request $request)
                 "data"=>null
             ]);
         }
+
+        if(!(User::find($actualuser->id))->isavailable()){
+             return response()->json([
+                "status"=>402,
+                "message"=>"error",
+                "error"=>"Votre compte est désactivé!",
+                "data"=>null
+            ]);
+        }
+
+        $actualese=$this->getEse($actualuser->id);
+        if(!$actualese){
+            return response()->json([
+                "status"=>402,
+                "message"=>"error",
+                "error"=>"unknown enterprise",
+                "data"=>null
+            ]);
+        }
+        //test if exists new user
+        $ifexists = user::join('usersenterprises as E','users.id','E.user_id')
+        ->where('users.name','=',$request['name'])
+        ->where('E.enterprise_id',$actualese->id)->first();
+            if($ifexists){
+                return response()->json([
+                    "status"=>500,
+                    "message"=>"error",
+                    "error"=>"duplicated member",
+                    "data"=>$ifexists
+                ]); 
+            }else{
+                try {
+                    $request['uuid']="GOM".date('Y').$this->EseNumberUsers($actualese->id);
+                    $request['user_name']="member".$this->EseNumberUsers($actualese->id);
+                    $request['user_password']="member".date('his').$this->EseNumberUsers($actualese->id);
+                    $request['status']="enabled";
+                    $newuser = user::create($request->all());
+                    if($newuser){
+                        usersenterprise::create([
+                            'user_id'=>$newuser->id,
+                            'enterprise_id'=>$actualese->id
+                        ]);
+    
+                        //create user as customer
+                        $ascustomer = CustomerController::create([
+                            'created_by_id'=>$actualuser->id,
+                            'customerName'=>$newuser->name,
+                            'phone'=>$newuser->user_phone,
+                            'mail'=>$newuser->user_mail,
+                            'type'=>'physique',
+                            'enterprise_id'=>$actualese->id,
+                            'uuid'=>$newuser->uuid,
+                            'member_id'=>$newuser->id
+                        ]);
+    
+                        $cdf=moneys::where('enterprise_id',$actualese->id)->where('abreviation','CDF')->first();
+                        $usd=moneys::where('enterprise_id',$actualese->id)->where('abreviation','USD')->first();
+    
+                        $cdfaccount=wekamemberaccounts::create([
+                            'sold'=>$request['soldecdf']?$request['soldecdf']:0,
+                            'description'=>'Compte '.$newuser->name.' CDF',
+                            'money_id'=>$cdf->id,
+                            'user_id'=>$newuser->id,
+                            'enterprise_id'=>$actualese->id,
+                            'account_number'=>"CP".date('Y').$this->EseNumberAccounts($actualese->id),
+                            'account_status'=>"enabled"
+                        ]);  
+                        
+                        $usdaccount=wekamemberaccounts::create([
+                            'sold'=>$request['soldeusd']?$request['soldeusd']:0,
+                            'description'=>'Compte '.$newuser->name.' USD',
+                            'money_id'=>$usd->id,
+                            'user_id'=>$newuser->id,
+                            'enterprise_id'=>$actualese->id,
+                            'account_number'=>"CP".date('Y').$this->EseNumberAccounts($actualese->id),
+                            'account_status'=>"enabled"
+                        ]);
+                    }
+
+                    if($request['returned'] && $request['returned']==='customer'){
+                    $datatoreturn=$customerctrl->show($ascustomer);
+                    }else{
+                    $datatoreturn=$this->showweka($newuser);
+                    }  
+                return response()->json([
+                    "status"=>200,
+                    "message"=>"success",
+                    "error"=>null,
+                    "data"=>$datatoreturn
+                ]);
+
+            } catch (Exception $e) {
+                return response()->json([
+                    "status"=>500,
+                    "message"=>"error",
+                    "error"=>$e->getMessage(),
+                    "data"=>null
+                ]); 
+            } 
+        }
      }
+
      public function wekaimportmembers(Request $request){
         $actualuser=$this->getinfosuser($request->data['sentby']);
         $actualese=$this->getEse($actualuser->id);
@@ -2492,12 +2519,12 @@ public function store(Request $request)
             $membersentupdated['user_phone']=$membersent['phone']?$membersent['phone']:"";
             $membersentupdated['user_mail']=$membersent['email']?$membersent['email']:"";
             $membersentupdated['user_name']="member".date('his').$key;
-            $membersentupdated['full_name']=$membersent['fullname']?$membersent['fullname']:"";
+            $membersentupdated['name']=$membersent['fullname']?$membersent['fullname']:"";
             $membersentupdated['uuid']=$membersent['uuid']?$membersent['uuid']:"";
 
             //test if exists new user
             $ifexists = user::join('usersenterprises as E','users.id','E.user_id')
-            ->where('full_name',$membersentupdated['full_name'])
+            ->where('name',$membersentupdated['name'])
             ->where('E.enterprise_id',$actualese->id)->first();
         if($ifexists){
             
@@ -2512,7 +2539,7 @@ public function store(Request $request)
                     //create user as customer
                     $ascustomer = CustomerController::create([
                             'created_by_id'=>$actualuser->id,
-                            'customerName'=>$newuser->full_name,
+                            'customerName'=>$newuser->name,
                             'phone'=>$newuser->user_phone,
                             'mail'=>$newuser->user_mail,
                             'type'=>'physique',
@@ -2526,7 +2553,7 @@ public function store(Request $request)
 
                     $cdfaccount=wekamemberaccounts::create([
                         'sold'=>$membersent['soldecdf']?$membersent['soldecdf']:0,
-                        'description'=>'Compte '.$newuser->full_name.' CDF',
+                        'description'=>'Compte '.$newuser->name.' CDF',
                         'money_id'=>$cdf->id,
                         'user_id'=>$newuser->id,
                         'enterprise_id'=>$actualese->id,
@@ -2536,7 +2563,7 @@ public function store(Request $request)
                     
                     $usdaccount=wekamemberaccounts::create([
                         'sold'=>$membersent['soldeusd']?$membersent['soldeusd']:0,
-                        'description'=>'Compte '.$newuser->full_name.' USD',
+                        'description'=>'Compte '.$newuser->name.' USD',
                         'money_id'=>$usd->id,
                         'user_id'=>$newuser->id,
                         'enterprise_id'=>$actualese->id,

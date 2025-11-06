@@ -152,6 +152,10 @@ class PermissionSeeder extends Seeder
             'agents.add',
             'agents.edit',
             'agents.delete',
+            'agents.create_account',
+            'agents.see_account',
+            'agents.see_account_sold',
+            'agents.disable',
 
             // Dépôts
             'depots.all',

@@ -550,7 +550,7 @@ class AuthController extends Controller
             }
 
             DB::commit();
-
+            $permissions=$user->getAllPermissions()->pluck('name')->toArray();
             // 9️⃣ Retour API
             return $this->successResponse('success', [
                 'user'            => $user,
@@ -558,7 +558,7 @@ class AuthController extends Controller
                 'defaultmoney'    => $this->defaultmoney($actualEse['id'] ?? null),
                 'access_token'    => $plainTextToken,       // token à utiliser pour Authorization Bearer
                 'expires_in'      => 3600,
-                'permissions'     =>$user->permissions(),                   // 10 minutes en secondes
+                'permissions'     =>$permissions,                   // 10 minutes en secondes
                 'refresh_token'   => $refreshTokenString,
                 'refresh_expires_at' => $refreshToken->expires_at,
             ]);
