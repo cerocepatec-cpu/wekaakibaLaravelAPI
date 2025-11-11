@@ -14,4 +14,8 @@ class moneys extends Model
         'money_name',
         'enterprise_id'
     ];
+
+    protected $casts = [
+        'billages' => 'array', // permet d'accéder directement sous forme de tableau
+    ];
 }

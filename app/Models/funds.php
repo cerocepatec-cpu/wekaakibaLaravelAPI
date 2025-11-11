@@ -5,6 +5,7 @@ namespace App\Models;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Support\Facades\Auth;
+use Illuminate\Support\Facades\DB;
 
 class funds extends Model
 {
@@ -19,6 +20,24 @@ class funds extends Model
         'type',
         'fund_status'
     ];
+
+     /**
+     * Récupère les soldes totaux d'un utilisateur,
+     * groupés par devise, avec l’abréviation de la monnaie.
+     */
+    public static function getUserBalancesGroupedByMoney(int $userId)
+    {
+        return self::query()
+            ->join('moneys', 'funds.money_id', '=', 'moneys.id')
+            ->select(
+                'funds.money_id',
+                'moneys.abreviation',
+                DB::raw('SUM(funds.sold) as total_sold')
+            )
+            ->where('funds.user_id', $userId)
+            ->groupBy('funds.money_id', 'moneys.abreviation')
+            ->get();
+    }
 
      public function isavailable(): bool
     {
@@ -72,4 +91,40 @@ class funds extends Model
         ->where('fund_status', 'enabled')
         ->first();
     }
+
+    /**
+     * Récupère toutes les caisses d'un utilisateur avec les infos de la monnaie.
+     *
+     * @param int $userId
+     * @return \Illuminate\Support\Collection
+     */
+    public static function getUserFundsWithMoney(int $userId)
+    {
+        return self::query()
+            ->join('moneys', 'funds.money_id', '=', 'moneys.id')
+            ->select(
+                'funds.id',
+                'funds.description',
+                'funds.sold',
+                'funds.money_id',
+                'moneys.abreviation',
+                'moneys.name as money_name',
+                'funds.fund_status',
+                'funds.type'
+            )
+            ->where('funds.user_id', $userId)
+            ->where('funds.fund_status', 'enabled')
+            ->get();
+    }
+
+    public function enterprise()
+    {
+        return $this->belongsTo(Enterprises::class, 'enterprise_id');
+    }
+
+    public function currency()
+    {
+        return $this->belongsTo(moneys::class);
+    }
+
 }

@@ -2,17 +2,21 @@
 
 namespace App\Http\Controllers;
 
+use Exception;
+use App\Models\User;
 use App\Models\funds;
+use App\Models\moneys;
 use Illuminate\Http\Request;
+use App\Models\decision_team;
 use App\Models\requestHistory;
+use App\Models\providerspayments;
+use Illuminate\Support\Facades\DB;
+use App\Models\StockHistoryController;
 use App\Http\Requests\StorefundsRequest;
 use App\Http\Requests\UpdatefundsRequest;
-use App\Models\decision_team;
-use App\Models\moneys;
-use App\Models\providerspayments;
-use App\Models\StockHistoryController;
-use Exception;
-use Illuminate\Support\Facades\DB;
+use App\Models\Closure;
+use App\Models\UserClosure;
+use Barryvdh\DomPDF\Facade\Pdf;
 
 class FundsController extends Controller
 {
@@ -41,29 +45,151 @@ class FundsController extends Controller
         }
     }
 
-    public function mines($user){
-        $list=[];
-        $actualuser=$this->getinfosuser($user);
-        $ese=$this->getEse($user);
-        if ($actualuser) {
+    public function getUserFunds(Request $request, $userId)
+    {
+        $authUser = $request->user();
 
-            if ($actualuser['user_type']!=='super_admin') {
-                $list= funds::leftjoin('users as U', 'funds.user_id','=','U.id')
-                ->leftjoin('moneys as M', 'funds.money_id','=','M.id')
-                ->where('user_id','=',$user)
-                ->get(['M.abreviation as money_abreviation', 'U.user_name', 'funds.*']);
-            }
-            else{
-                $list= funds::leftjoin('users as U', 'funds.user_id','=','U.id')
-                ->leftjoin('moneys as M', 'funds.money_id','=','M.id')
-                ->where('funds.enterprise_id',$ese->id)
-                ->get(['M.abreviation as money_abreviation', 'U.user_name', 'funds.*']);
-            }
+        if (!$authUser) {
+            return $this->errorResponse('Utilisateur non authentifié.', 401);
         }
-         
-        return $list;
+
+        $user =User::find($userId);
+        if (!$user || $user->status !== 'enabled') {
+            return $this->errorResponse('Utilisateur introuvable ou désactivé.', 404);
+        }
+
+        if ($authUser->id !== $userId) {
+            return $this->errorResponse('Accès refusé.', 403);
+        }
+
+        $funds =funds::getUserFundsWithMoney($userId);
+
+        return $this->successResponse($funds, 'success');
     }
 
+    /**
+     * Récupère les soldes de plusieurs utilisateurs,
+     * groupés par devise (money_id / abreviation).
+     */
+    public function getMultipleUsersBalances(Request $request)
+    {
+        try {
+            // Vérifier que l’utilisateur connecté via le token existe
+            $authUser = $request->user();
+            if (!$authUser) {
+                return $this->errorResponse("Utilisateur non authentifié.", 401);
+            }
+
+            // Récupérer la liste des IDs depuis le body JSON
+            $userIds = $request->input('user_ids');
+            if (!is_array($userIds) || empty($userIds)) {
+                return $this->errorResponse("Veuillez fournir une liste valide d'utilisateurs.", 400);
+            }
+
+            $results = [];
+            $invalidUsers = [];
+
+            foreach ($userIds as $userId) {
+                $user = User::find($userId);
+
+                if (!$user) {
+                    $invalidUsers[] = [
+                        'user_id' => $userId,
+                        'reason' => 'Utilisateur introuvable'
+                    ];
+                    continue;
+                }
+
+                if ($user->status !== "enabled") {
+                    $invalidUsers[] = [
+                        'user_id' => $userId,
+                        'reason' => 'Utilisateur désactivé'
+                    ];
+                    continue;
+                }
+
+                // Récupérer les soldes pour cet utilisateur
+                $balances =funds::getUserBalancesGroupedByMoney($userId);
+
+                $results[] = [
+                    'user_id' => $user->id,
+                    'user_name' => $user->name ?? null,
+                    'balances' => $balances
+                ];
+            }
+
+            return $this->successResponse('success',[
+                'valid_users' => $results,
+                'invalid_users' => $invalidUsers
+            ]);
+
+        } catch (\Exception $e) {
+            return $this->errorResponse("Erreur interne du serveur : " . $e->getMessage(), 500);
+        }
+    }
+
+     /**
+     * Récupère les soldes d’un utilisateur (groupés par monnaie)
+     */
+    public function getUserBalances(Request $request, $user_id)
+    {
+        try {
+            // Vérifier que l’utilisateur connecté via le token existe
+            $authUser = $request->user();
+            if (!$authUser) {
+                return $this->errorResponse("Utilisateur non authentifié.", 401);
+            }
+
+            // Vérifier que l’utilisateur cible existe
+            $user =User::find($user_id);
+            if (!$user) {
+                return $this->errorResponse("Utilisateur introuvable.", 404);
+            }
+
+            // Vérifier le statut de l’utilisateur
+            if ($user->status !== "enabled") {
+                return $this->errorResponse("Utilisateur désactivé.", 403);
+            }
+
+            // Récupérer les soldes groupés par devise
+            $balances =funds::getUserBalancesGroupedByMoney($user_id);
+
+            return $this->successResponse("success",$balances);
+
+        } catch (\Exception $e) {
+            return $this->errorResponse("Erreur interne du serveur : " . $e->getMessage(), 500);
+        }
+    }
+
+    public function mines($user)
+    {
+        $list = [];
+        $actualuser = $this->getinfosuser($user);
+        $ese = $this->getEse($user);
+
+        if ($actualuser) {
+            $list = funds::join('users as U', 'funds.user_id', '=', 'U.id')
+                ->join('moneys as M', 'funds.money_id', '=', 'M.id')
+                ->where('funds.user_id', $actualuser->id)
+                ->where('funds.fund_status', 'enabled')
+                ->get([
+                    'M.abreviation as money_abreviation',
+                    'M.billages',
+                    'U.user_name',
+                    'funds.*'
+                ]);
+
+            $list->transform(function ($item) {
+                if (is_string($item->billages)) {
+                    $decoded = json_decode($item->billages, true);
+                    $item->billages = is_array($decoded) ? $decoded : [];
+                }
+                return $item;
+            });
+        }
+
+        return $list;
+    }
     /**
      * Show the form for creating a new resource.
      *

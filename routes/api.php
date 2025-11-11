@@ -1,7 +1,9 @@
 <?php
 use Illuminate\Http\Response;
+use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\File;
 use Illuminate\Support\Facades\Route;
+use App\Http\Controllers\AuthController;
 use App\Http\Controllers\MailController;
 use App\Http\Controllers\BonusController;
 use App\Http\Controllers\DebtsController;
@@ -22,6 +24,7 @@ use App\Http\Controllers\DefectsController;
 use App\Http\Controllers\ReasonsController;
 use App\Http\Controllers\AccountsController;
 use App\Http\Controllers\CautionsController;
+use App\Http\Controllers\ClosuresController;
 use App\Http\Controllers\CommentsController;
 use App\Http\Controllers\InvoicesController;
 use App\Http\Controllers\PosusersController;
@@ -34,6 +37,7 @@ use App\Http\Controllers\PositionsController;
 use App\Http\Controllers\SafeguardController;
 use App\Http\Controllers\SerdipaysController;
 use App\Http\Controllers\VehiculesController;
+use App\Http\Controllers\PermissionController;
 use App\Http\Controllers\WekagroupsController;
 use App\Http\Controllers\DepartementController;
 use App\Http\Controllers\EnterprisesController;
@@ -53,6 +57,7 @@ use App\Http\Controllers\FenceTicketingController;
 use App\Http\Controllers\InvoiceDetailsController;
 use App\Http\Controllers\InvoicesStatusController;
 use App\Http\Controllers\RequestHistoryController;
+use App\Http\Controllers\RolePermissionController;
 use App\Http\Controllers\SelfReferencesController;
 use App\Http\Controllers\TransfertstockController;
 use App\Http\Controllers\AdvancesalariesController;
@@ -93,10 +98,6 @@ use App\Http\Controllers\NbrdecisionteamValidationController;
 use App\Http\Controllers\UsersMobileMoneyProvidersController;
 use App\Http\Controllers\CategoriesCustomerControllerController;
 use App\Http\Controllers\CategoriesServicesControllerController;
-use App\Http\Controllers\RolePermissionController;
-use App\Http\Controllers\AuthController;
-use App\Http\Controllers\PermissionController;
-use Illuminate\Support\Facades\Auth;
 
 /*
 |--------------------------------------------------------------------------
@@ -146,6 +147,11 @@ Route::middleware(['auth:sanctum'])->group(function () {
         Route::post('/request_history/new',[RequestHistoryController::class,'store']);
         Route::post('/weka/transactions/new',[WekaAccountsTransactionsController::class,'store']);
         Route::post('/weka/transactions/depositbymobilemoney',[WekaAccountsTransactionsController::class,'handleMobileMoneyAccount']);
+        Route::get('/funds/balances/byuser/{user_id}', [FundsController::class, 'getUserBalances']);
+        Route::post('/closures/new', [ClosuresController::class, 'store']);
+        Route::post('/closures/{closure}/receive', [ClosuresController::class, 'receiveClosure']);
+        Route::post('/closures/{closure}/reject', [ClosuresController::class, 'rejectClosure']);
+        Route::get('/users/{userId}/funds', [FundsController::class, 'getUserFunds'])->name('users.funds');
     });
 
     /** Permissions et roles sensibles mais peut rester sans PIN */
@@ -178,11 +184,18 @@ Route::middleware(['auth:sanctum'])->group(function () {
     Route::get('/weka/member/accounts/{id}',[WekamemberaccountsController::class,'membersaccounts']);
     Route::post('/weka/members/lookup',[UsersController::class,'wekamemberslookup']);
     Route::get('/weka/account/transactions',[WekaAccountsTransactionsController::class,'getTransactionsByAccount']);
+    Route::post('/weka/transactions/pdfexport', [WekaAccountsTransactionsController::class, 'exportTransactionsPdf']);
     Route::post('/funds/savemultiples',[RequestHistoryController::class,'savemultiple']);
     Route::post('/expenditures/doneby',[ExpendituresController::class,'doneby']);
     Route::get('/weka/transactionspaginated',[WekaAccountsTransactionsController::class,'getTransactionslistByUser']);
     Route::get('/weka/mobilemoneyproviders/enterprise/{id}',[MobileMoneyProvidersController::class,'index']);
-});
+
+    Route::get('/closures/{id}', [ClosuresController::class, 'showClosure']);
+    Route::get('/closures', [ClosuresController::class, 'index']);
+    Route::get('/closures/{closureId}/print', [ClosuresController::class, 'printClosure']);
+    Route::get('/closures/{closureId}/print-ticket', [ClosuresController::class, 'printClosureTicket']);
+        
+    });
 
 
 /** Users getways */
@@ -881,7 +894,6 @@ Route::get('/clear-laravel-cache', function () {
 // Route::post('/weka/mobile-dashboard',[WekaAccountsTransactionsController::class,'dashboardmobileatwekaakiba']);
 // Route::post('/weka/transactions/update',[WekaAccountsTransactionsController::class,'updatetransactions']);
 // Route::post('/weka/transactions/excelexport', [WekaAccountsTransactionsController::class, 'exportTransactionsExcel']);
-// Route::post('/weka/transactions/pdfexport', [WekaAccountsTransactionsController::class, 'exportTransactionsPdf']);
 // Route::post('/weka/transactions/validateimputation', [WekaAccountsTransactionsController::class, 'validateimputation']);
 // Route::post('/weka/firstentries',[WekafirstentriesController::class,'index']);
 // Route::post('/weka/firstentries/new',[WekafirstentriesController::class,'store']);
