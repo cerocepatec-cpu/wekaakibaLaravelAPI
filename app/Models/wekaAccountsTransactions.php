@@ -32,4 +32,14 @@ class wekaAccountsTransactions extends Model
 	'imputed_by',
     'fund_id'
     ];
+
+    public function memberAccount()
+    {
+        return $this->belongsTo(wekamemberaccounts::class, 'member_account_id');
+    }
+
+    public function doneBy()
+    {
+        return $this->belongsTo(User::class, 'user_id');
+    }
 }

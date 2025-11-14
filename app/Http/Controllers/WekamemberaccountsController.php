@@ -27,13 +27,37 @@ class WekamemberaccountsController extends Controller
         //
     }
 
+    public function getaccountsumsbyuser($usersent){
+        $user = User::find($usersent);
+        if (!$user || $user->status=='disabled') {
+            return $this->errorResponse('Utilisateur invalide ou non trouvé.');
+        }
+
+        // Récupérer les comptes actifs de l'utilisateur avec les infos de devise
+        $accounts =wekamemberaccounts::getBalancesByUser($user);
+
+        if (!$accounts) {
+            return $this->errorResponse('Aucun compte trouvé pour cet utilisateur.');
+        }
+
+        return $this->successResponse('success', $accounts);
+    }
+
     /**
      * get all accounts paginated
      */
     public function allaccounts($user){
         $list=[];
         $actualuser=Auth::user();
+        if (!$actualuser || $actualuser->status=='disabled') {
+            return $this->errorResponse('Utilisateur non authentifié!',400);
+        }
+
         $ese=$this->getEse($user);
+        if (!$ese || $ese->status==="disabled") {
+            return $this->errorResponse('Entreprise desactivee',400);
+        }
+        
         if ($actualuser) {
             $list= wekamemberaccounts::leftjoin('users as U', 'wekamemberaccounts.user_id','=','U.id')
                 ->leftjoin('moneys as M', 'wekamemberaccounts.money_id','=','M.id')
@@ -263,6 +287,7 @@ class WekamemberaccountsController extends Controller
          unset($account->sold);
         return $account;
     }
+
     /**
      * Display the specified resource.
      *

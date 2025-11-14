@@ -228,7 +228,6 @@ class AuthController extends Controller
             $reset = $resetQuery->first();
 
             if (!$reset) {
-                Log::warning('Token invalide ou introuvable pour identifiant: ' . ($request->email ?? $request->user_phone));
                 DB::rollBack();
                 return $this->errorResponse("Token invalide ou expiré.", 400);
             }
@@ -236,7 +235,6 @@ class AuthController extends Controller
             // 🔹 3️⃣ Vérifier expiration (60 minutes)
             $expiresAt = \Carbon\Carbon::parse($reset->created_at)->addMinutes(60);
             if (\Carbon\Carbon::now()->gt($expiresAt)) {
-                Log::warning('Token expiré pour identifiant: ' . ($request->email ?? $request->user_phone));
                 DB::rollBack();
                 return $this->errorResponse("Token expiré.", 400);
             }
@@ -265,12 +263,10 @@ class AuthController extends Controller
                 ->where($isEmailReset ? 'email' : 'user_phone', $isEmailReset ? $request->email : $request->user_phone)
                 ->delete();
 
-            Log::info('Mot de passe réinitialisé avec succès pour ' . ($request->email ?? $request->user_phone));
 
             // 🔹 7️⃣ Notification selon le mode de réinitialisation
             if ($isEmailReset && $user->email) {
                 Mail::to($user->email)->send(new PasswordResetSuccessMail($user));
-                Log::info("Email de notification envoyé à: {$user->email}");
             } elseif ($isPhoneReset && $user->user_phone) {
                 $smsText = "Bonjour, votre mot de passe a été réinitialisé avec succès. Si ce n'est pas vous, contactez le support immédiatement.";
                 Log::info("SMS à {$user->user_phone}: {$smsText}");

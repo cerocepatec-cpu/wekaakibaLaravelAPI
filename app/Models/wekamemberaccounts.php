@@ -68,4 +68,20 @@ class wekamemberaccounts extends Model
         ->first();
     }
 
+    /**
+     * Calcule la somme des comptes d'un utilisateur par devise
+     *
+     * @param \App\Models\User $user
+     * @return array Exemple : ['CD' => 20000, 'USD' => 500000]
+     */
+    public static function getBalancesByUser($user): array
+    {
+        return self::where('user_id', $user->id)
+            ->where('account_status', 'enabled')
+            ->with('money')
+            ->get()
+            ->groupBy(fn($account) => $account->money->abreviation)
+            ->map(fn($group) => $group->sum('sold'))
+            ->toArray();
+    }
 }

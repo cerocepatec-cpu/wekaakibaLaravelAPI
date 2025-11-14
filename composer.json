@@ -17,6 +17,7 @@
         "maatwebsite/excel": "3.1.40",
         "maennchen/zipstream-php": "2.1",
         "phpmailer/phpmailer": "^6.9",
+        "predis/predis": "^3.2",
         "propaganistas/laravel-phone": "^4.4",
         "spatie/laravel-permission": "^6.21"
     },

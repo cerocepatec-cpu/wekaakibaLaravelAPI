@@ -26,6 +26,7 @@ use App\Http\Requests\StorerequestHistoryRequest;
 use App\Http\Requests\StorewekaAccountsTransactionsRequest;
 use App\Http\Requests\UpdatewekaAccountsTransactionsRequest;
 use App\Helpers\PhoneHelper;
+use Carbon\CarbonPeriod;
 
 class WekaAccountsTransactionsController extends Controller
 {
@@ -240,83 +241,239 @@ class WekaAccountsTransactionsController extends Controller
     }
 
 
-    /**
-     * transactions list paginated by user
-     */
-    // public function getTransactionslistByUser(Request $request)
-    // {
-    //     // if (empty($request->from) || empty($request->to)) {
-    //     //    $request['from'] = date('Y-m-01');
-    //     //    $request['to'] = date('Y-m-t');
-    //     // }
+    public function getUserTransactions(Request $request)
+    {
+        $authUser = Auth::user();
+        $memberId = $authUser->id;
 
-    //     if (!isset($request->user_id) || empty($request->user_id)) {
-    //         return $this->errorResponse('user not sent');
-    //     }
+        // Validation : tout est nullable sauf per_page
+        $request->validate([
+            'member_account_ids' => 'nullable|array',
+            'member_account_ids.*' => 'integer',
+            'moneys' => 'nullable|array',
+            'moneys.*' => 'integer',
+            'type' => 'nullable|string',
+            'start_date' => 'nullable|date',
+            'end_date' => 'nullable|date',
+            'date_filter' => 'nullable|string|in:
+                today,yesterday,
+                last_7_days,last_30_days,
+                this_week,last_week,
+                this_month,last_month,
+                this_quarter,
+                this_year',
+            'per_page' => 'nullable|integer|min:1',
+            'timezone' => 'nullable|string' // pour gérer le fuseau horaire
+        ]);
 
-    //     $actualuser = $this->getinfosuser($request->user_id);
-    //     if (!$actualuser) {
-    //         return $this->errorResponse('unknown user');
-    //     }
+        $tz = $request->timezone ?? 'Africa/Lubumbashi'; // Valeur par défaut
 
-    //     $enterprise = $this->getEse($actualuser->id);
-    //     if (!$enterprise) {
-    //         return $this->errorResponse('unknown enterprise');
-    //     }
+        $perPage = $request->per_page ??5;
 
-    //     try {
-    //         $query = wekaAccountsTransactions::query();
-    //         $query->where('member_id',$request->user_id);
-    //         $query->where('transaction_status', '!=', 'cancelled');
-    //         $query->whereBetween('done_at', [
-    //             $request['from'] . ' 00:00:00',
-    //             $request['to'] . ' 23:59:59'
-    //         ]);
+        // Base query
+       $query = wekaAccountsTransactions::query()
+    ->where('member_id', $memberId)
+    ->with([
+        // eager load le compte associé
+        'memberAccount:id,account_number,money_id',
+        // eager load la monnaie associée au compte
+        'memberAccount.money:id,abreviation',
+        // l'utilisateur qui a fait l'opération
+        'doneBy:id,name'
+    ]);
 
-           
-    //         $allIds = [];
-    //         (clone $query)->select('weka_accounts_transactions.id')
-    //             ->orderBy('weka_accounts_transactions.id')    
-    //             ->chunk(1000, function ($transactions) use (&$allIds) {
-    //                 foreach ($transactions as $t) {
-    //                     $allIds[] = $t->id;
-    //                 }
-    //             });
 
-            
-    //         $limit = $request->get('limit', 50);
-    //         $paginated = $query->orderBy('done_at', 'desc')->paginate($limit);
-    //         $data = $paginated->getCollection()->transform(fn($item) => $this->show($item));
-    //         $paginated->setCollection($data);
+        // Filtre comptes
+        if ($request->filled('member_account_ids')) {
+            $query->whereIn('member_account_id', $request->member_account_ids);
+        }
 
-            
-    //        $totalsByMoney = [];
-    //        $totalsByMoney = $data->groupBy('money_id')->map(function ($items, $money_id) 
-    //        {
-    //             return [
-    //                 'money_id'     => $money_id,
-    //                 'abreviation'  => $items->first()['abreviation'] ?? '',
-    //                 'total'      => $items->sum('amount'),
-    //                 'total_in'     => $items->where('type', 'deposit')->sum('amount'),
-    //                 'total_out'    => $items->where('type', 'withdraw')->sum('amount'),
-    //                 'total_net'    => $items->where('type', 'deposit')->sum('amount') - $items->where('type', 'withdraw')->sum('amount'),
-    //             ];
-    //         })->values();
+        // Filtre monnaies
+        if ($request->filled('moneys')) {
+            $query->whereHas('memberAccount', function ($q) use ($request) {
+                $q->whereIn('money_id', $request->moneys);
+            });
+        }
 
-    //         return response()->json([
-    //             "status" => 200,
-    //             "from"=> $request['from'],
-    //             "to"=> $request['to'], 
-    //             "message" => "success",
-    //             "error" => null,
-    //             "data" => $paginated,
-    //             "all_ids" => $allIds,
-    //             "totals_by_money" => $totalsByMoney
-    //         ]);
-    //     } catch (Exception $ex) {
-    //         return $this->errorResponse($ex->getMessage(), 500);
-    //     }
-    // }
+        // Filtre type (deposit, withdrawal...)
+        if ($request->filled('type')) {
+            $query->where('type', $request->type);
+        }
+
+        // Timezone
+        $now = now($tz);
+
+        // Inputs normalisés
+        $start = $request->start_date ? Carbon::parse($request->start_date, $tz)->startOfDay() : null;
+        $end   = $request->end_date ? Carbon::parse($request->end_date, $tz)->endOfDay() : null;
+
+        // FILTRES PRÉDÉFINIS
+        if ($request->filled('date_filter')) {
+
+            switch ($request->date_filter) {
+
+                case 'today':
+                    $query->whereBetween('done_at', [
+                        $now->copy()->startOfDay(),
+                        $now->copy()->endOfDay()
+                    ]);
+                    break;
+
+                case 'yesterday':
+                    $y = $now->copy()->subDay();
+                    $query->whereBetween('done_at', [
+                        $y->startOfDay(),
+                        $y->endOfDay()
+                    ]);
+                    break;
+
+                case 'last_7_days':
+                    $query->whereBetween('done_at', [
+                        $now->copy()->subDays(6)->startOfDay(),
+                        $now->copy()->endOfDay()
+                    ]);
+                    break;
+
+                case 'last_30_days':
+                    $query->whereBetween('done_at', [
+                        $now->copy()->subDays(29)->startOfDay(),
+                        $now->copy()->endOfDay()
+                    ]);
+                    break;
+
+                case 'this_week':
+                    $query->whereBetween('done_at', [
+                        $now->copy()->startOfWeek(),
+                        $now->copy()->endOfWeek()
+                    ]);
+                    break;
+
+                case 'last_week':
+                    $lw = $now->copy()->subWeek();
+                    $query->whereBetween('done_at', [
+                        $lw->startOfWeek(),
+                        $lw->endOfWeek()
+                    ]);
+                    break;
+
+                case 'this_month':
+                    $query->whereBetween('done_at', [
+                        $now->copy()->startOfMonth(),
+                        $now->copy()->endOfMonth()
+                    ]);
+                    break;
+
+                case 'last_month':
+                    $lm = $now->copy()->subMonth();
+                    $query->whereBetween('done_at', [
+                        $lm->startOfMonth(),
+                        $lm->endOfMonth()
+                    ]);
+                    break;
+
+                case 'this_quarter':
+                    $query->whereBetween('done_at', [
+                        $now->copy()->firstOfQuarter(),
+                        $now->copy()->lastOfQuarter()
+                    ]);
+                    break;
+
+                case 'this_year':
+                    $query->whereBetween('done_at', [
+                        $now->copy()->startOfYear(),
+                        $now->copy()->endOfYear()
+                    ]);
+                    break;
+            }
+        }
+        else {
+            if ($start && !$end) {
+                $query->where('done_at', '>=', $start);
+            }
+
+            if (!$start && $end) {
+                $query->where('done_at', '<=', $end);
+            }
+
+            if ($start && $end) {
+                if ($start < $end) {
+                    $query->whereBetween('done_at', [$start, $end]);
+                } else {
+                    $query->where('done_at', '>=', $start);
+                }
+            }
+        }
+        // Tri DESC par date opération
+        $query->orderBy('done_at', 'desc');
+        // Récupérer toutes les monnaies présentes dans le query
+        $transactions = $query->with('memberAccount.money')->get();
+
+        // Initialiser un tableau
+        $total_amount = [];
+        $total_fees = [];
+        $total_deposits = [];
+        $total_withdrawals = [];
+        $balance_before = [];
+        $balance_after = [];
+
+        foreach($transactions as $t) {
+            $money = $t->memberAccount->money->abreviation ?? 'UNKNOWN';
+
+            // Amount total
+            $total_amount[$money] = ($total_amount[$money] ?? 0) + $t->amount;
+
+            // Fees total
+            $total_fees[$money] = ($total_fees[$money] ?? 0) + $t->fees;
+
+            // Deposits
+            if($t->type === 'deposit'){
+                $total_deposits[$money] = ($total_deposits[$money] ?? 0) + $t->amount;
+            }
+
+            // Withdrawals
+            if($t->type === 'withdraw'){
+                $total_withdrawals[$money] = ($total_withdrawals[$money] ?? 0) + $t->amount;
+            }
+
+            // Balance before
+            if($start && $t->done_at < $start){
+                $balance_before[$money] = $t->sold_after;
+            }
+
+            // Balance after (dernier sold_after par monnaie)
+            $balance_after[$money] = $t->sold_after;
+        }
+
+        $stats = [
+            'total_transactions' => $query->count(),
+            'total_amount' => $total_amount,
+            'total_fees' => $total_fees,
+            'total_deposits' => $total_deposits,
+            'total_withdrawals' => $total_withdrawals,
+            'balance_before' => $balance_before,
+            'balance_after' => $balance_after,
+        ];
+        $balance_net = [];
+        foreach($total_deposits as $money => $deposit){
+            $withdraw = $total_withdrawals[$money] ?? 0;
+            $fees = $total_fees[$money] ?? 0;
+            $balance_net[$money] = $deposit - $withdraw - $fees;
+        }
+
+        // Ajouter au tableau de stats
+        $stats['balance_net'] = $balance_net;
+    
+
+        return response()->json([
+            'status' => 200,
+            'message' => 'success',
+            'stats' => $stats,
+            'data' => $query->paginate($perPage)
+        ]);
+
+    }
+
+  
     public function getTransactionslistByUser(Request $request)
     {
         if (!isset($request->user_id) || empty($request->user_id)) {

@@ -177,20 +177,26 @@ Route::middleware(['auth:sanctum'])->group(function () {
     Route::post('/funds/requesthistories',[FundsController::class,'requesthistoriesbyagent']);
     Route::get('/money/enterprise/{id}',[MoneysController::class,'index']);
     Route::get('/request_history/byfund/{fund}',[RequestHistoryController::class,'getbyfund']);
+
     Route::get('/weka/searchaccountsbyenterprise',[WekamemberaccountsController::class,'searchaccountsbyenterprise']);
     Route::post('/weka/searchsingleaccount',[WekamemberaccountsController::class,'searchSingleAccount']);
     Route::post('/weka/usersbytypes/enterprise',[UsersController::class,'usersbytypes']);
     Route::get('/weka/allaccounts/{id}',[WekamemberaccountsController::class,'allaccounts']);
     Route::get('/weka/member/accounts/{id}',[WekamemberaccountsController::class,'membersaccounts']);
+    Route::get('/weka/getaccountsumsbyuser/{id}',[WekamemberaccountsController::class,'getaccountsumsbyuser']);
+
     Route::post('/weka/members/lookup',[UsersController::class,'wekamemberslookup']);
+
     Route::get('/weka/account/transactions',[WekaAccountsTransactionsController::class,'getTransactionsByAccount']);
     Route::post('/weka/transactions/pdfexport', [WekaAccountsTransactionsController::class, 'exportTransactionsPdf']);
+    Route::get('/user/transactions',[WekaAccountsTransactionsController::class, 'getUserTransactions']);
     Route::post('/funds/savemultiples',[RequestHistoryController::class,'savemultiple']);
     Route::post('/expenditures/doneby',[ExpendituresController::class,'doneby']);
     Route::get('/weka/transactionspaginated',[WekaAccountsTransactionsController::class,'getTransactionslistByUser']);
     Route::get('/weka/mobilemoneyproviders/enterprise/{id}',[MobileMoneyProvidersController::class,'index']);
 
     Route::get('/closures/{id}', [ClosuresController::class, 'showClosure']);
+    Route::get('/closures/show/{id}', [ClosuresController::class, 'show']);
     Route::get('/closures', [ClosuresController::class, 'index']);
     Route::get('/closures/{closureId}/print', [ClosuresController::class, 'printClosure']);
     Route::get('/closures/{closureId}/print-ticket', [ClosuresController::class, 'printClosureTicket']);

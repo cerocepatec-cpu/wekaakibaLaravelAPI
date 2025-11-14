@@ -27,14 +27,29 @@ class ClosuresController extends Controller
 
         // 🔹 Filtres
         if ($request->filled('agent_id')) {
-            $query->where('user_id', $request->agent_id);
+             $agentIds = $request->agent_id;
+            // Si c’est une chaîne "1,2,3", on la découpe :
+            if (is_string($agentIds)) {
+                $agentIds = array_map('intval', explode(',', $agentIds));
+            }
+            $query->whereIn('user_id', $agentIds);
         }
+
         if ($request->filled('fund_id')) {
-            $query->where('fund_id', $request->fund_id);
+            $fundIds = $request->fund_id;
+
+            if (is_string($fundIds)) {
+                $fundIds = array_map('intval', explode(',', $fundIds));
+            }
+
+            $query->whereIn('fund_id', $fundIds);
         }
+
+        
         if ($request->filled('currency_id')) {
             $query->where('currency_id', $request->currency_id);
         }
+
         if ($request->filled('status')) {
             $query->where('status', $request->status);
         }
@@ -273,7 +288,42 @@ class ClosuresController extends Controller
                 'trace' => $th->getTraceAsString(),
             ], 500);
         }
-       
+    }
+    
+    public function show($id)
+    {
+        $user =Auth::user();
+        if (!$user) {
+            return $this->errorResponse("Utilisateur non authentifié.", 401);
+        }
+
+        $closure = Closure::with([
+            'fund:id,description',
+            'currency:id,abreviation',
+            'user:id,name,email',
+            'fund.enterprise:id,name,adresse,phone,mail,logo'
+        ])->find($id);
+
+        if (!$closure) {
+            return $this->errorResponse("Clôture introuvable.", 404);
+        }
+
+        $enterprise =$this->getEse($user->id);
+        try {
+             $data = [
+            'closure' => $closure,
+            'fund' => $closure->fund,
+            'currency' => $closure->currency,
+            'user' => $closure->user,
+            'connected' => $user,
+            'enterprise' => $enterprise,
+            'date' => now()->format('d/m/Y H:i'),
+            ];
+
+            return $this->successResponse("success",$data);
+        } catch (\Throwable $th) {
+            return $this->errorResponse($th->getMessage(),500);
+        }
     }
 
     public function printClosureTicket($id)
