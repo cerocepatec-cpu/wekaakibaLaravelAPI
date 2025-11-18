@@ -24,6 +24,9 @@ use Illuminate\Routing\Controller as BaseController;
 use Illuminate\Foundation\Validation\ValidatesRequests;
 use Illuminate\Foundation\Auth\Access\AuthorizesRequests;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Facades\Mail;
+use Twilio\Rest\Client;
 
 /**
  * @OA\Info(
@@ -323,4 +326,57 @@ class Controller extends BaseController
     public function accountmembersold($account,$member){
         return wekamemberaccounts::where('id','=',$account)->where('user_id',$member)->first();
     }
+
+    public function sendSms($phone, $message)
+    {
+        try {
+            $twilio = new Client(env('TWILIO_SID'), env('TWILIO_TOKEN'));
+
+            $twilio->messages->create(
+                $phone,
+                [
+                    "from" => env("TWILIO_FROM"),
+                    "body" => $message
+                ]
+            );
+
+        } catch (\Exception $e) {
+            Log::error("SMS Error: " . $e->getMessage());
+        }
+    }
+
+    public function sendTransactionEmail(
+        $user, 
+        $title, 
+        $subtitle, 
+        $transaction, 
+        $fees, 
+        $before, 
+        $after,
+        $sourceAccount,
+        $beneficiaryAccount)
+    {
+        try {
+            Mail::send('emails.transaction', [
+                "title" => $title,
+                "subtitle" => $subtitle,
+                "amount" => $transaction->amount,
+                "fees" => $transaction->fees,
+                "before" => $transaction->sold_before,
+                "after" => $transaction->sold_after,
+                "motif" => $transaction->motif,
+                "currency" =>wekamemberaccounts::getMoneyAbreviationByAccountNumber($sourceAccount),
+                "uuid" => $transaction->uuid,
+                "source_account"=>$sourceAccount,
+                "beneficiary_account"=>$beneficiaryAccount
+            ], function ($msg) use ($user, $title) {
+                $msg->to($user->email)
+                    ->subject($title);
+            });
+        } catch (\Exception $e) {
+            Log::error("EMAIL Error: " . $e->getMessage());
+        }
+    }
+
+
 }

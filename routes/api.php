@@ -190,6 +190,10 @@ Route::middleware(['auth:sanctum'])->group(function () {
     Route::get('/weka/account/transactions',[WekaAccountsTransactionsController::class,'getTransactionsByAccount']);
     Route::post('/weka/transactions/pdfexport', [WekaAccountsTransactionsController::class, 'exportTransactionsPdf']);
     Route::get('/user/transactions',[WekaAccountsTransactionsController::class, 'getUserTransactions']);
+    Route::get('/user/stats', [WekaAccountsTransactionsController::class, 'getUserStats']);
+    Route::post('/weka/transactions/sendmoneyto', [WekaAccountsTransactionsController::class, 'sendMoneyAccountToAccount']);
+    Route::post('/weka/transactions/sendmoneytopreview', [WekaAccountsTransactionsController::class, 'sendMoneyAccountToAccountPreview']);
+
     Route::post('/funds/savemultiples',[RequestHistoryController::class,'savemultiple']);
     Route::post('/expenditures/doneby',[ExpendituresController::class,'doneby']);
     Route::get('/weka/transactionspaginated',[WekaAccountsTransactionsController::class,'getTransactionslistByUser']);

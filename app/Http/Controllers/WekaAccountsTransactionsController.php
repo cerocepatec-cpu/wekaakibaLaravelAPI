@@ -27,6 +27,10 @@ use App\Http\Requests\StorewekaAccountsTransactionsRequest;
 use App\Http\Requests\UpdatewekaAccountsTransactionsRequest;
 use App\Helpers\PhoneHelper;
 use Carbon\CarbonPeriod;
+use Twilio\Rest\Client;
+use Illuminate\Support\Facades\Cache;
+use Illuminate\Support\Facades\Mail;
+
 
 class WekaAccountsTransactionsController extends Controller
 {
@@ -240,6 +244,159 @@ class WekaAccountsTransactionsController extends Controller
         }
     }
 
+    public function getUserStats(Request $request)
+{
+    $user = Auth::user();
+
+    $request->validate([
+        'period' => 'nullable|string|in:7_days,this_week,this_month,this_year',
+    ]);
+
+    $period = $request->period ?? '7_days';
+
+    // Base query
+    $query = wekaAccountsTransactions::query()
+        ->where('member_id', $user->id)
+        ->with(['memberAccount.money']);
+
+    $stats = [];
+
+    switch ($period) {
+
+        case '7_days':
+            $start = Carbon::now()->subDays(6)->startOfDay();
+            $end = Carbon::now()->endOfDay();
+
+            // Initialiser les 7 jours
+            $dates = [];
+            for ($i = 0; $i < 7; $i++) {
+                $day = Carbon::now()->subDays($i)->format('Y-m-d');
+                $dates[$day] = [
+                    'deposits' => [],
+                    'withdrawals' => [],
+                    'balance_net' => []
+                ];
+            }
+
+            $transactions = $query->whereBetween('done_at', [$start, $end])->get();
+
+            foreach ($transactions as $t) {
+                $day = Carbon::parse($t->done_at)->format('Y-m-d');
+                $money = $t->memberAccount->money->abreviation ?? 'USD';
+
+                if ($t->type === 'deposit') {
+                    $dates[$day]['deposits'][$money] = ($dates[$day]['deposits'][$money] ?? 0) + $t->amount;
+                } elseif ($t->type === 'withdraw') {
+                    $dates[$day]['withdrawals'][$money] = ($dates[$day]['withdrawals'][$money] ?? 0) + $t->amount;
+                }
+
+                $dates[$day]['balance_net'][$money] =
+                    ($dates[$day]['deposits'][$money] ?? 0)
+                    - ($dates[$day]['withdrawals'][$money] ?? 0);
+            }
+
+            $stats = $dates;
+            break;
+
+        case 'this_week':
+
+            // Début semaine (Lundi) — Fin semaine (Dimanche)
+            $start = Carbon::now()->startOfWeek(Carbon::MONDAY);
+            $end = Carbon::now()->endOfWeek(Carbon::SUNDAY);
+
+            $days = [];
+            for ($i = 0; $i < 7; $i++) {
+                $day = $start->copy()->addDays($i)->format('Y-m-d');
+                $days[$day] = [
+                    'deposits' => [],
+                    'withdrawals' => [],
+                    'balance_net' => []
+                ];
+            }
+
+            $transactions = $query->whereBetween('done_at', [$start, $end])->get();
+
+            foreach ($transactions as $t) {
+                $day = Carbon::parse($t->done_at)->format('Y-m-d');
+                $money = $t->memberAccount->money->abreviation ?? 'USD';
+
+                if ($t->type === 'deposit') {
+                    $days[$day]['deposits'][$money] = ($days[$day]['deposits'][$money] ?? 0) + $t->amount;
+                } elseif ($t->type === 'withdraw') {
+                    $days[$day]['withdrawals'][$money] = ($days[$day]['withdrawals'][$money] ?? 0) + $t->amount;
+                }
+
+                $days[$day]['balance_net'][$money] =
+                    ($days[$day]['deposits'][$money] ?? 0)
+                    - ($days[$day]['withdrawals'][$money] ?? 0);
+            }
+
+            $stats = $days;
+            break;
+
+        case 'this_month':
+            $start = Carbon::now()->startOfMonth();
+            $end = Carbon::now()->endOfMonth();
+
+            $weeks = [];
+            $transactions = $query->whereBetween('done_at', [$start, $end])->get();
+
+            foreach ($transactions as $t) {
+                $week = Carbon::parse($t->done_at)->weekOfMonth;
+                $money = $t->memberAccount->money->abreviation ?? 'USD';
+
+                $weeks[$week]['deposits'][$money] = ($weeks[$week]['deposits'][$money] ?? 0);
+                $weeks[$week]['withdrawals'][$money] = ($weeks[$week]['withdrawals'][$money] ?? 0);
+
+                if ($t->type === 'deposit') $weeks[$week]['deposits'][$money] += $t->amount;
+                elseif ($t->type === 'withdraw') $weeks[$week]['withdrawals'][$money] += $t->amount;
+
+                $weeks[$week]['balance_net'][$money] =
+                    ($weeks[$week]['deposits'][$money] ?? 0)
+                    - ($weeks[$week]['withdrawals'][$money] ?? 0);
+            }
+
+            $stats = $weeks;
+            break;
+
+        case 'this_year':
+            $start = Carbon::now()->startOfYear();
+            $end = Carbon::now()->endOfYear();
+
+            $months = [];
+            $transactions = $query->whereBetween('done_at', [$start, $end])->get();
+
+            foreach ($transactions as $t) {
+                $month = Carbon::parse($t->done_at)->format('F');
+                $money = $t->memberAccount->money->abreviation ?? 'USD';
+
+                $months[$month]['deposits'][$money] = ($months[$month]['deposits'][$money] ?? 0);
+                $months[$month]['withdrawals'][$money] = ($months[$month]['withdrawals'][$money] ?? 0);
+
+                if ($t->type === 'deposit') $months[$month]['deposits'][$money] += $t->amount;
+                elseif ($t->type === 'withdraw') $months[$month]['withdrawals'][$money] += $t->amount;
+
+                $months[$month]['balance_net'][$money] =
+                    ($months[$month]['deposits'][$money] ?? 0)
+                    - ($months[$month]['withdrawals'][$money] ?? 0);
+            }
+
+            $stats = $months;
+            break;
+
+        default:
+            return response()->json([
+                'status' => 400,
+                'message' => 'Invalid period'
+            ]);
+    }
+
+    return response()->json([
+        'status' => 200,
+        'message' => 'success',
+        'data' => $stats
+    ]);
+}
 
     public function getUserTransactions(Request $request)
     {
@@ -1829,6 +1986,382 @@ private function accountToAccount(Request $request){
     $user->adress?? null
    );
    return $this->successResponse('success',$this->show($sourceTransaction));
+}
+
+    public function sendMoneyAccountToAccountPreview(Request $request)
+    {
+        $user = Auth::user();
+        $accountSource = $request['member_account_id'] ?? null;
+        $accountBeneficiary = $request['beneficiary_account_id'] ?? null;
+        $amount = $request['amount'] ?? 0;
+        $motif = $request['motif'] ?? '';
+        $otpChannel = strtolower($request['otp_channel'] ?? '');
+
+        if (!in_array($otpChannel, ['sms', 'mail'])) {
+            return $this->errorResponse("Veuillez préciser un canal OTP valide : sms ou mail.");
+        }
+
+        // ---- VALIDATIONS ----
+        if (!$accountSource || $accountSource <= 0)
+            return $this->errorResponse("Vous devez sélectionner un compte source.");
+
+        if (!$accountBeneficiary || $accountBeneficiary <= 0)
+            return $this->errorResponse("Vous devez sélectionner un compte bénéficiaire.");
+
+        if ($amount <= 0)
+            return $this->errorResponse("Le montant doit être supérieur à 0.");
+
+        if (strlen($motif) <= 2)
+            return $this->errorResponse("Veuillez fournir un motif valide.");
+
+        $source = wekamemberaccounts::find($accountSource);
+        if (!$source)
+            return $this->errorResponse("Compte source non trouvé.");
+
+        if (!$source->isavailable())
+            return $this->errorResponse("Action sur le compte source non autorisée.");
+
+        if ($source->user_id !== $user->id)
+            return $this->errorResponse("Ce compte ne vous appartient pas.");
+
+        $beneficiary = wekamemberaccounts::findBy("account_number", $accountBeneficiary);
+        if (!$beneficiary)
+            return $this->errorResponse("Compte bénéficiaire non trouvé.");
+
+        if (!$beneficiary->isavailable())
+            return $this->errorResponse("Action sur le compte bénéficiaire non autorisée.");
+
+        if ($beneficiary->money_id !== $source->money_id)
+            return $this->errorResponse("Les comptes n'utilisent pas la même monnaie.");
+
+        if ($source->sold < $amount)
+            return $this->errorResponse("Solde insuffisant.");
+
+        // -----------------------
+        // 🔐 GÉNÉRATION OTP
+        // -----------------------
+        $otp = rand(100000, 999999);
+
+        // Token transactionnel
+        $transactionToken = base64_encode(json_encode([
+            "source" => $source->id,
+            "beneficiary" => $beneficiary->account_number,
+            "amount" => $amount,
+            "motif" => $motif,
+            "user" => $user->id,
+            "time" => time()
+        ]));
+
+        // Sauvegarde 5 min
+       Cache::put("otp_transfer_{$user->id}", [
+            "otp" => $otp,
+            "transaction_token" => $transactionToken,
+            "otp_channel" => $otpChannel,   // 🔥 ON STOCKE LE CANAL
+        ], now()->addMinutes(5));
+
+        // -----------------------
+        // 📬 ENVOI OTP
+        // -----------------------
+        if ($otpChannel === 'sms') {
+
+            try {
+                $twilio = new Client(env('TWILIO_SID'), env('TWILIO_TOKEN'));
+                $twilio->messages->create(
+                    $user->user_phone,
+                    [
+                        "from" => env("TWILIO_FROM"),
+                        "body" => "Votre OTP de confirmation est : $otp"
+                    ]
+                );
+            } catch (\Exception $e) {
+                return $this->errorResponse("Erreur lors de l'envoi du SMS : " . $e->getMessage());
+            }
+
+        } else {
+
+            try {
+                Mail::raw(
+                    "Votre OTP pour confirmer la transaction est : $otp",
+                    function ($message) use ($user) {
+                        $message->to($user->email)
+                            ->subject("OTP de confirmation");
+                    }
+                );
+            } catch (\Exception $e) {
+                return $this->errorResponse("Erreur lors de l'envoi de l'email : " . $e->getMessage());
+            }
+        }
+        $fees = transactionfee::calculateFee($amount, $source->money_id, 'send');
+        $totalAmount = $amount + $fees['fee'];
+        // -----------------------
+        // 📄 RÉSUMÉ
+        // -----------------------
+        $preview = [
+            "otp_channel" => $otpChannel,
+            "transaction_token" => $transactionToken,
+            "amount" => $amount,
+            "fees" => $fees['fee'],
+            "total_to_debit" => $totalAmount,
+            "motif" => $motif,
+            "source_account" => [
+                "number" => $source->account_number,
+                "sold_before" => $source->sold,
+                "sold_after" => $source->sold - $amount,
+            ],
+            "beneficiary_account" => [
+                "number" => $beneficiary->account_number,
+                "sold_before" => $beneficiary->sold,
+                "sold_after" => $beneficiary->sold + $amount,
+            ],
+        ];
+
+        return $this->successResponse("success", $preview);
+    }
+
+   public function sendMoneyAccountToAccount(Request $request)
+{
+    DB::beginTransaction();
+    
+    try {
+
+        $user = Auth::user();
+        $otp = $request["otp"] ?? null;
+        $token = $request["transaction_token"] ?? null;
+
+        if (!$otp || !$token)
+            return $this->errorResponse("OTP ou token manquant.");
+
+        // OTP CACHE
+        $cached = Cache::get("otp_transfer_{$user->id}");
+        if (!$cached)
+            return $this->errorResponse("OTP expiré ou non trouvé.");
+
+        if ($cached["otp"] != $otp)
+            return $this->errorResponse("OTP incorrect.");
+
+        if ($cached["transaction_token"] != $token)
+            return $this->errorResponse("Token invalide.");
+
+        // 🔥 Recuperation du canal OTP (sms / email)
+        $otpChannel = $cached["otp_channel"] ?? "sms";   
+
+        // EXTRACTION TOKEN
+        $data = json_decode(base64_decode($token), true);
+        $accountSource = $data["source"];
+        $accountBeneficiary = $data["beneficiary"];
+        $amount = $data["amount"];
+        $motif = $data["motif"];
+
+        $payment = 0;
+
+        // ----------------------------
+        // VALIDATIONS
+        // ----------------------------
+        $sourceMemberAccount = wekamemberaccounts::find($accountSource);
+        if (!$sourceMemberAccount) { DB::rollBack(); return $this->errorResponse("Aucun compte source trouvé"); }
+
+        if (!$sourceMemberAccount->isavailable()) { DB::rollBack(); return $this->errorResponse("Action sur le compte source non autorisée."); }
+
+        if ($sourceMemberAccount->user_id !== $user->id) { DB::rollBack(); return $this->errorResponse("Le compte n'est pas à vous."); }
+
+        $beneficiaryMemberAccount = wekamemberaccounts::findBy("account_number", $accountBeneficiary);
+        if (!$beneficiaryMemberAccount) { DB::rollBack(); return $this->errorResponse("Aucun compte bénéficiaire trouvé."); }
+
+        if (!$beneficiaryMemberAccount->isavailable()) { DB::rollBack(); return $this->errorResponse("Action sur le compte bénéficiaire non autorisée."); }
+
+        if ($beneficiaryMemberAccount->money_id !== $sourceMemberAccount->money_id) { 
+            DB::rollBack(); 
+            return $this->errorResponse("Les deux comptes n'utilisent pas la même monnaie."); 
+        }
+
+        // ----------------------------
+        // FEES
+        // ----------------------------
+        $fees = transactionfee::calculateFee($amount, $sourceMemberAccount->money_id, 'send');
+        $totalAmount = $amount + $fees['fee'];
+
+        if ($sourceMemberAccount->sold < $totalAmount) {
+            DB::rollBack();
+            return $this->errorResponse("Solde insuffisant pour montant + frais.");
+        }
+
+        // ----------------------------
+        // AUTOMATIC FUND
+        // ----------------------------
+        $automatiFund = funds::getAutomaticFund($sourceMemberAccount->money_id);
+        if (!$automatiFund) { DB::rollBack(); return $this->errorResponse("Aucune caisse configurée pour les commissions!"); }
+
+        $automatiFund->sold += $fees['fee'];
+        $automatiFund->save();
+
+        $this->createLocalRequestHistory(
+            $user->id,
+            $automatiFund->id,
+            $fees['fee'],
+            "Frais de retrait. ".$motif,
+            'entry',
+            null,
+            null,
+            null,
+            $automatiFund->sold,
+            null,
+            "WEKA AKIBA SYSTEM",
+            $sourceMemberAccount->description,
+            null,
+            null,
+            $sourceMemberAccount->id,
+            'approvment'
+        );
+
+        // ----------------------------
+        // DEBIT SOURCE
+        // ----------------------------
+        $sourceSoldBefore = $sourceMemberAccount->sold;
+        $sourceMemberAccount->sold -= $totalAmount;
+        $sourceMemberAccount->save();
+        $sourceSoldAfter = $sourceMemberAccount->sold;
+
+        $sourceTransaction = $this->createTransaction(
+            $totalAmount,
+            $sourceSoldBefore,
+            $sourceSoldAfter,
+            "withdraw",
+            $motif,
+            $user->id,
+            $sourceMemberAccount->id,
+            $sourceMemberAccount->user_id,
+            null,
+            $user->full_name ?: $user->user_name,
+            $fees['fee'],
+            $user->user_phone,
+            $user->adress
+        );
+
+        // ----------------------------
+        // CREDIT BENEFICIAIRE
+        // ----------------------------
+        $beneficiarySoldBefore = $beneficiaryMemberAccount->sold;
+        $beneficiaryMemberAccount->sold += $amount;
+        $beneficiaryMemberAccount->save();
+        $beneficiarySoldAfter = $beneficiaryMemberAccount->sold;
+
+        $beneficiaryTransaction = $this->createTransaction(
+            $amount,
+            $beneficiarySoldBefore,
+            $beneficiarySoldAfter,
+            "entry",
+            $motif,
+            $user->id,
+            $beneficiaryMemberAccount->id,
+            $beneficiaryMemberAccount->user_id,
+            null,
+            $user->full_name ?: $user->user_name,
+            0,
+            $user->user_phone,
+            $user->adress
+        );
+
+        // ----------------------------
+        // CLEAN OTP
+        // ----------------------------
+        Cache::forget("otp_transfer_{$user->id}");
+
+        // ----------------------------
+        // COMMIT
+        // ----------------------------
+        DB::commit();
+
+        // -----------------------------------------------------------
+        // 🔥 🔥 🔥 ENVOI DES NOTIFICATIONS (selon canal OTP)
+        // -----------------------------------------------------------
+
+        $this->sendFinalNotifications(
+            $otpChannel,
+            $user,
+            $sourceTransaction,
+            $sourceSoldAfter,
+            $beneficiaryMemberAccount,
+            $beneficiaryTransaction,
+            $beneficiarySoldAfter,
+            $fees['fee'],
+            $amount,
+            $sourceMemberAccount->account_number,
+            $beneficiaryMemberAccount->account_number
+        );
+
+        return $this->successResponse("success", $this->show($sourceTransaction));
+
+    } catch (\Throwable $e) {
+        DB::rollBack();
+        return $this->errorResponse("Erreur interne : " . $e->getMessage());
+    }
+}
+
+private function sendFinalNotifications(
+    $otpChannel,
+    $sourceUser,
+    $sourceTransaction,
+    $sourceSoldAfter,
+    $beneficiaryAccount,
+    $beneficiaryTransaction,
+    $beneficiarySoldAfter,
+    $fees,
+    $amount,
+    $sourceAccountNumber,
+    $beneficiaryAccountNumber
+) {
+    $beneficiaryUser =User::find($beneficiaryAccount->user_id);
+
+    if ($otpChannel === "sms") {
+
+        // 🔥 SMS Source
+        $smsSource =
+        "WEKA AKIBA\n".
+        "Transaction ID : {$sourceTransaction->uuid}\n".
+        "Retrait : {$amount}\n".
+        "Frais : {$fees}\n".
+        "Total débité : ".($amount+$fees)."\n".
+        "Solde restant : {$sourceSoldAfter}\n";
+
+        $this->sendSms($sourceUser->user_phone, $smsSource);
+
+        // 🔥 SMS Bénéficiaire
+        $smsBenef =
+        "WEKA AKIBA\n".
+        "Transaction ID : {$beneficiaryTransaction->uuid}\n".
+        "Dépôt reçu : {$amount}\n".
+        "Solde disponible : {$beneficiarySoldAfter}\n";
+
+        $this->sendSms($beneficiaryUser->user_phone, $smsBenef);
+
+    } else {
+
+        // 🔥 EMAIL SOURCE
+        $this->sendTransactionEmail(
+            $sourceUser,
+            "Notification de Retrait",
+            "Retrait effectué sur votre compte.",
+            $sourceTransaction,
+            $fees,
+            $sourceTransaction->sold_before,
+            $sourceSoldAfter,
+            $sourceAccountNumber,
+            $beneficiaryAccountNumber
+        );
+
+        // 🔥 EMAIL BÉNÉFICIAIRE
+        $this->sendTransactionEmail(
+            $beneficiaryUser,
+            "Notification de Dépôt",
+            "Vous avez reçu un dépôt sur votre compte.",
+            $beneficiaryTransaction,
+            0,
+            $beneficiaryTransaction->sold_before,
+            $beneficiarySoldAfter,
+            $sourceAccountNumber,
+            $beneficiaryAccountNumber
+        );
+    }
 }
 
 private function createTransaction($amount,$soldBefore,$soldAfter,$type,$motif,$userId,$memberAccountId,$memberId,$accountId,$operationDoneBy,$fees,$phone,$adresse){

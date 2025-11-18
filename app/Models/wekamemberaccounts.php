@@ -66,6 +66,11 @@ class wekamemberaccounts extends Model
             $query->where('abreviation', strtoupper($currency));
         })
         ->first();
+    }  
+    
+    public static function findBy($culumn,$value):self
+    {
+        return self::where($culumn, $value)->first();
     }
 
     /**
@@ -84,4 +89,28 @@ class wekamemberaccounts extends Model
             ->map(fn($group) => $group->sum('sold'))
             ->toArray();
     }
+
+    /**
+     * Retourne la monnaie liée à un numéro de compte
+     *
+     * @param string $accountNumber
+     * @return \App\Models\moneys|null
+     */
+    public static function getMoneyByAccountNumber(string $accountNumber)
+    {
+        return self::where('account_number', $accountNumber)
+            ->with('money')
+            ->first()
+            ->money ?? null;
+    }
+
+    public static function getMoneyAbreviationByAccountNumber(string $accountNumber)
+    {
+        $account = self::where('account_number', $accountNumber)
+            ->with('money')
+            ->first();
+
+        return $account->money->abreviation ?? null;
+    }
+
 }
