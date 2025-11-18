@@ -37,6 +37,7 @@ use App\Http\Controllers\PositionsController;
 use App\Http\Controllers\SafeguardController;
 use App\Http\Controllers\SerdipaysController;
 use App\Http\Controllers\VehiculesController;
+use App\Http\Controllers\AgentBonusController;
 use App\Http\Controllers\PermissionController;
 use App\Http\Controllers\WekagroupsController;
 use App\Http\Controllers\DepartementController;
@@ -204,6 +205,10 @@ Route::middleware(['auth:sanctum'])->group(function () {
     Route::get('/closures', [ClosuresController::class, 'index']);
     Route::get('/closures/{closureId}/print', [ClosuresController::class, 'printClosure']);
     Route::get('/closures/{closureId}/print-ticket', [ClosuresController::class, 'printClosureTicket']);
+
+    Route::get('/agent/bonus/pending', [AgentBonusController::class, 'pending']);
+    Route::post('/agent/bonus/withdraw/currency', [AgentBonusController::class, 'withdrawByCurrency']);
+    Route::post('/agent/bonus/withdraw/all', [AgentBonusController::class, 'withdrawAll']);
         
     });
 

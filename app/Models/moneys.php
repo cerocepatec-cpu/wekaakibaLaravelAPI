@@ -18,4 +18,10 @@ class moneys extends Model
     protected $casts = [
         'billages' => 'array', // permet d'accéder directement sous forme de tableau
     ];
+
+    public function bonuses()
+    {
+        return $this->hasMany(AgentBonus::class, 'currency_id');
+    }
+
 }

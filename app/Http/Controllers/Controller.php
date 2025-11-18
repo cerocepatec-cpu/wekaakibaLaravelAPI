@@ -13,9 +13,11 @@ use App\Models\Invoices;
 use App\Models\libraries;
 use Illuminate\Support\Str;
 use App\Models\PricesCategories;
+use App\Models\requestHistory;
 use App\Models\ServicesController;
 use App\Models\usersenterprise;
 use App\Models\UsersMobileMoneyProviders;
+use App\Models\wekaAccountsTransactions;
 use App\Models\wekamemberaccounts;
 use Carbon\Carbon;
 use Illuminate\Support\Facades\DB;
@@ -379,4 +381,50 @@ class Controller extends BaseController
     }
 
 
+    public function createTransaction($amount,$soldBefore,$soldAfter,$type,$motif,$userId,$memberAccountId,$memberId,$accountId,$operationDoneBy,$fees,$phone,$adresse){
+        return wekaAccountsTransactions::create([
+            'amount' => $amount,
+            'sold_before' => $soldBefore,
+            'sold_after' => $soldAfter,
+            'type' => $type,
+            'motif' => $motif,
+            'user_id' => $userId,
+            'member_account_id' => $memberAccountId,
+            'member_id' => $memberId,
+            'enterprise_id' =>$this->getEse($userId)['id'],
+            'done_at' =>date('Y-m-d'),
+            'account_id' => $accountId,
+            'operation_done_by' =>$operationDoneBy,
+            'uuid' => $this->getUuId('WT','WK'),
+            'fees' =>$fees,
+            'transaction_status' =>'validated',
+            'phone' => $phone,
+            'adresse' => $adresse,
+        ]); 
+    }
+
+    public function createLocalRequestHistory($userId,$fundId,$amount,$motif,$type,$requestId,$fenceId,$invoiceId,$sold,$accountId,$beneficiary,$provenance,$fendReceiverId,$expenditureId,$memberAccountId,$nature){
+        return  requestHistory::create([
+            'user_id'=>$userId,
+            'fund_id'=>$fundId,
+            'amount'=>$amount,
+            'motif'=>$motif,
+            'type'=>$type,
+            'request_id'=>$requestId,
+            'fence_id'=>$fenceId,
+            'invoice_id'=>$invoiceId,
+            'enterprise_id'=>$this->getEse($userId)['id'],
+            'sold'=>$sold,
+            'done_at'=>date('Y-m-d'),
+            'account_id'=>$accountId,
+            'status'=>'validated',
+            'beneficiary'=>$beneficiary,
+            'provenance'=>$provenance,
+            'uuid'=>$this->getUuId('RH','FH'),
+            'fund_receiver_id'=>$fendReceiverId,
+            'expenditure_id'=>$expenditureId,
+            'member_account_id'=>$memberAccountId,
+            'nature'=>$nature,
+        ]);
+    }
 }

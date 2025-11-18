@@ -30,7 +30,7 @@ use Carbon\CarbonPeriod;
 use Twilio\Rest\Client;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Mail;
-
+use App\Services\BonusService;
 
 class WekaAccountsTransactionsController extends Controller
 {
@@ -2142,7 +2142,7 @@ private function accountToAccount(Request $request){
         if ($cached["transaction_token"] != $token)
             return $this->errorResponse("Token invalide.");
 
-        // 🔥 Recuperation du canal OTP (sms / email)
+        // 🔥 Canal OTP (sms / email)
         $otpChannel = $cached["otp_channel"] ?? "sms";   
 
         // EXTRACTION TOKEN
@@ -2151,8 +2151,6 @@ private function accountToAccount(Request $request){
         $accountBeneficiary = $data["beneficiary"];
         $amount = $data["amount"];
         $motif = $data["motif"];
-
-        $payment = 0;
 
         // ----------------------------
         // VALIDATIONS
@@ -2191,9 +2189,11 @@ private function accountToAccount(Request $request){
         $automatiFund = funds::getAutomaticFund($sourceMemberAccount->money_id);
         if (!$automatiFund) { DB::rollBack(); return $this->errorResponse("Aucune caisse configurée pour les commissions!"); }
 
+        // 👉 D'abord ajouter TOUTES les commissions à la caisse
         $automatiFund->sold += $fees['fee'];
         $automatiFund->save();
 
+        // Historique incluant 100% des frais
         $this->createLocalRequestHistory(
             $user->id,
             $automatiFund->id,
@@ -2212,6 +2212,7 @@ private function accountToAccount(Request $request){
             $sourceMemberAccount->id,
             'approvment'
         );
+
 
         // ----------------------------
         // DEBIT SOURCE
@@ -2261,6 +2262,67 @@ private function accountToAccount(Request $request){
             $user->adress
         );
 
+         // -------------------------------------------------------------
+        // 🔥 🔥 🔥 BONUS DU COLLECTEUR (si applicable)
+        // -------------------------------------------------------------
+        $beneficiaryUser = User::find($beneficiaryMemberAccount->user_id);
+
+        if ($beneficiaryUser && $beneficiaryUser->collector == true) {
+
+            $percentage = floatval($beneficiaryUser->collection_percentage);
+
+            if ($percentage > 0) {
+
+                // Bonus du collecteur sur les frais
+                $collectorBonus = ($fees['fee'] * $percentage) / 100;
+
+                // Part restante pour la caisse
+                $systemCommission = $fees['fee'] - $collectorBonus;
+
+                if ($systemCommission < 0) {
+                    DB::rollBack();
+                    return $this->errorResponse("Erreur: commission collecteur > frais.");
+                }
+
+                // Corriger le solde de la caisse
+                $automatiFund->sold -= $collectorBonus; // retirer la part collecteur
+                $automatiFund->save();
+
+                // Création du bonus dans AgentBonus
+                app(\App\Services\BonusService::class)->createBonus(
+                    $beneficiaryUser->id,
+                    $sourceTransaction,
+                    $collectorBonus,
+                    $beneficiaryMemberAccount->account_number,
+                    "Bonus collecteur ($percentage%) sur les frais."
+                );
+
+                // Historique bonus collecteur
+                // $this->createLocalRequestHistory(
+                //     $beneficiaryUser->id,
+                //     $automatiFund->id,
+                //     $collectorBonus,
+                //     "Bonus collecteur ($percentage%) déduit des commissions",
+                //     'entry',
+                //     null,
+                //     null,
+                //     null,
+                //     $automatiFund->sold,
+                //     null,
+                //     "WEKA AKIBA SYSTEM",
+                //     $beneficiaryMemberAccount->description,
+                //     null,
+                //     null,
+                //     $beneficiaryMemberAccount->id,
+                //     'bonus'
+                // );
+            }
+        }
+        // -------------------------------------------------------------
+        // FIN BONUS COLLECTEUR
+        // -------------------------------------------------------------
+
+
         // ----------------------------
         // CLEAN OTP
         // ----------------------------
@@ -2272,9 +2334,8 @@ private function accountToAccount(Request $request){
         DB::commit();
 
         // -----------------------------------------------------------
-        // 🔥 🔥 🔥 ENVOI DES NOTIFICATIONS (selon canal OTP)
+        // NOTIFICATIONS
         // -----------------------------------------------------------
-
         $this->sendFinalNotifications(
             $otpChannel,
             $user,
@@ -2296,6 +2357,7 @@ private function accountToAccount(Request $request){
         return $this->errorResponse("Erreur interne : " . $e->getMessage());
     }
 }
+
 
 private function sendFinalNotifications(
     $otpChannel,
@@ -2362,54 +2424,8 @@ private function sendFinalNotifications(
             $beneficiaryAccountNumber
         );
     }
-}
-
-private function createTransaction($amount,$soldBefore,$soldAfter,$type,$motif,$userId,$memberAccountId,$memberId,$accountId,$operationDoneBy,$fees,$phone,$adresse){
-    return wekaAccountsTransactions::create([
-        'amount' => $amount,
-        'sold_before' => $soldBefore,
-        'sold_after' => $soldAfter,
-        'type' => $type,
-        'motif' => $motif,
-        'user_id' => $userId,
-        'member_account_id' => $memberAccountId,
-        'member_id' => $memberId,
-        'enterprise_id' =>$this->getEse($userId)['id'],
-        'done_at' =>date('Y-m-d'),
-        'account_id' => $accountId,
-        'operation_done_by' =>$operationDoneBy,
-        'uuid' => $this->getUuId('WT','WK'),
-        'fees' =>$fees,
-        'transaction_status' =>'validated',
-        'phone' => $phone,
-        'adresse' => $adresse,
-    ]); 
-}
-
-    private function createLocalRequestHistory($userId,$fundId,$amount,$motif,$type,$requestId,$fenceId,$invoiceId,$sold,$accountId,$beneficiary,$provenance,$fendReceiverId,$expenditureId,$memberAccountId,$nature){
-        return  requestHistory::create([
-            'user_id'=>$userId,
-            'fund_id'=>$fundId,
-            'amount'=>$amount,
-            'motif'=>$motif,
-            'type'=>$type,
-            'request_id'=>$requestId,
-            'fence_id'=>$fenceId,
-            'invoice_id'=>$invoiceId,
-            'enterprise_id'=>$this->getEse($userId)['id'],
-            'sold'=>$sold,
-            'done_at'=>date('Y-m-d'),
-            'account_id'=>$accountId,
-            'status'=>'validated',
-            'beneficiary'=>$beneficiary,
-            'provenance'=>$provenance,
-            'uuid'=>$this->getUuId('RH','FH'),
-            'fund_receiver_id'=>$fendReceiverId,
-            'expenditure_id'=>$expenditureId,
-            'member_account_id'=>$memberAccountId,
-            'nature'=>$nature,
-        ]);
     }
+
     /**
      * transaction resume before validate
      */
