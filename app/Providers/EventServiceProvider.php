@@ -2,10 +2,7 @@
 
 namespace App\Providers;
 
-use Illuminate\Auth\Events\Registered;
-use Illuminate\Auth\Listeners\SendEmailVerificationNotification;
 use Illuminate\Foundation\Support\Providers\EventServiceProvider as ServiceProvider;
-use Illuminate\Support\Facades\Event;
 
 class EventServiceProvider extends ServiceProvider
 {
@@ -15,18 +12,29 @@ class EventServiceProvider extends ServiceProvider
      * @var array<class-string, array<int, class-string>>
      */
     protected $listen = [
-        Registered::class => [
-            SendEmailVerificationNotification::class,
-        ],
+        // Tu peux laisser vide — Laravel va découvrir les Events automatiquement
     ];
 
     /**
-     * Register any events for your application.
-     *
-     * @return void
+     * Activer l'auto-découverte des events dans app/Events
      */
+    public function shouldDiscoverEvents()
+    {
+        return true;
+    }
+
+    /**
+     * Définir où Laravel doit chercher les events à découvrir
+     */
+    protected function discoverEventsWithin()
+    {
+        return [
+            app_path('Events'),
+        ];
+    }
+
     public function boot()
     {
-        //
+        parent::boot();
     }
 }

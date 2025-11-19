@@ -3,11 +3,11 @@
 namespace App\Events;
 
 use Illuminate\Broadcasting\Channel;
-use Illuminate\Contracts\Broadcasting\ShouldBroadcast;
+use Illuminate\Contracts\Broadcasting\ShouldBroadcastNow;
 use Illuminate\Foundation\Events\Dispatchable;
 use Illuminate\Queue\SerializesModels;
 
-class UserDeactivated implements ShouldBroadcast
+class UserDeactivated implements ShouldBroadcastNow
 {
     use Dispatchable, SerializesModels;
 
@@ -18,19 +18,16 @@ class UserDeactivated implements ShouldBroadcast
         $this->userId = $userId;
     }
 
-    // Canal Redis
     public function broadcastOn()
-    {
+    { 
         return new Channel('user-status');
     }
 
-    // Nom de l’événement côté Node.js
     public function broadcastAs()
     {
         return 'user.deactivated';
     }
 
-    // Données envoyées à Node.js
     public function broadcastWith()
     {
         return [

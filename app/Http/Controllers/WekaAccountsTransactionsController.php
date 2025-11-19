@@ -10,7 +10,6 @@ use App\Models\moneys;
 use App\Models\Invoices;
 use App\Models\serdipays;
 use Illuminate\Http\Request;
-use App\Models\requestHistory;
 use App\Models\transactionfee;
 use Barryvdh\DomPDF\Facade\Pdf;
 use App\Models\wekafirstentries;
@@ -26,11 +25,11 @@ use App\Http\Requests\StorerequestHistoryRequest;
 use App\Http\Requests\StorewekaAccountsTransactionsRequest;
 use App\Http\Requests\UpdatewekaAccountsTransactionsRequest;
 use App\Helpers\PhoneHelper;
-use Carbon\CarbonPeriod;
 use Twilio\Rest\Client;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Mail;
-use App\Services\BonusService;
+use Illuminate\Pagination\LengthAwarePaginator;
+use Illuminate\Support\Facades\Event;
 
 class WekaAccountsTransactionsController extends Controller
 {
@@ -561,7 +560,7 @@ class WekaAccountsTransactionsController extends Controller
             }
         }
         // Tri DESC par date opération
-        $query->orderBy('done_at', 'desc');
+        $query->orderBy('created_at', 'desc');
         // Récupérer toutes les monnaies présentes dans le query
         $transactions = $query->with('memberAccount.money')->get();
 
@@ -619,15 +618,36 @@ class WekaAccountsTransactionsController extends Controller
 
         // Ajouter au tableau de stats
         $stats['balance_net'] = $balance_net;
-    
+
+       $allResults = $query->get();
+
+        // Appliquer show() à chaque item
+        $formatted = $allResults->map(function ($t) {
+            return $this->show($t);
+        });
+
+        // Pagination manuelle propre
+        $page = $request->page ?? 1;
+        $perPage = $perPage;
+        $offset = ($page - 1) * $perPage;
+
+        $paginated = new LengthAwarePaginator(
+            $formatted->slice($offset, $perPage)->values(),
+            $formatted->count(),
+            $perPage,
+            $page,
+            [
+                'path' => $request->url(),
+                'query' => $request->query(),
+            ]
+        );
 
         return response()->json([
             'status' => 200,
             'message' => 'success',
             'stats' => $stats,
-            'data' => $query->paginate($perPage)
+            'data' => $paginated
         ]);
-
     }
 
   
@@ -2261,12 +2281,10 @@ private function accountToAccount(Request $request){
             $user->user_phone,
             $user->adress
         );
-
          // -------------------------------------------------------------
         // 🔥 🔥 🔥 BONUS DU COLLECTEUR (si applicable)
         // -------------------------------------------------------------
         $beneficiaryUser = User::find($beneficiaryMemberAccount->user_id);
-
         if ($beneficiaryUser && $beneficiaryUser->collector == true) {
 
             $percentage = floatval($beneficiaryUser->collection_percentage);
@@ -2296,26 +2314,7 @@ private function accountToAccount(Request $request){
                     $beneficiaryMemberAccount->account_number,
                     "Bonus collecteur ($percentage%) sur les frais."
                 );
-
-                // Historique bonus collecteur
-                // $this->createLocalRequestHistory(
-                //     $beneficiaryUser->id,
-                //     $automatiFund->id,
-                //     $collectorBonus,
-                //     "Bonus collecteur ($percentage%) déduit des commissions",
-                //     'entry',
-                //     null,
-                //     null,
-                //     null,
-                //     $automatiFund->sold,
-                //     null,
-                //     "WEKA AKIBA SYSTEM",
-                //     $beneficiaryMemberAccount->description,
-                //     null,
-                //     null,
-                //     $beneficiaryMemberAccount->id,
-                //     'bonus'
-                // );
+                //ajouter un event real time pour le bonus recus
             }
         }
         // -------------------------------------------------------------
@@ -2349,7 +2348,31 @@ private function accountToAccount(Request $request){
             $sourceMemberAccount->account_number,
             $beneficiaryMemberAccount->account_number
         );
-
+        /**
+         * Envoi des events à Redis - Node.Js
+         */
+        event(new \App\Events\UserRealtimeNotification(
+                $beneficiaryUser->id,
+                'Nouveau dépôt',
+                'Vous avez reçu un dépôt de '.$amount.' '.wekamemberaccounts::getMoneyAbreviationByAccountNumber($beneficiaryMemberAccount->account_number),
+                'success'
+        )); 
+        
+        event(new \App\Events\MemberAccountUpdated(
+            $beneficiaryUser->id,
+            $beneficiaryMemberAccount
+        )); 
+        
+        event(new \App\Events\TransactionSent(
+            $beneficiaryUser->id,
+            $this->show($beneficiaryTransaction)
+        ));
+        
+        event(new \App\Events\TransactionSent(
+            $sourceMemberAccount->user_id,
+            $this->show($sourceTransaction)
+        ));
+        
         return $this->successResponse("success", $this->show($sourceTransaction));
 
     } catch (\Throwable $e) {
@@ -2962,7 +2985,7 @@ private function sendFinalNotifications(
         ->join('users as AU','WA.user_id','AU.id')
         ->leftjoin('accounts as A','weka_accounts_transactions.account_id','A.id')
         ->where('weka_accounts_transactions.id','=',$wekaAccountsTransactions->id)
-        ->get(['AU.user_name as member_user_name','AU.full_name as member_fullname','AU.uuid as member_uuid','weka_accounts_transactions.*','A.name as account_name','WA.description as memberaccount_name','M.abreviation','M.id as money_id','users.user_name as done_by_name','users.full_name as done_by_fullname','users.uuid as done_by_uuid'])->first();
+        ->get(['AU.name as member_name','AU.user_name as member_user_name','AU.full_name as member_fullname','AU.uuid as member_uuid','weka_accounts_transactions.*','A.name as account_name','WA.account_number','WA.description as memberaccount_name','M.abreviation','M.id as money_id','users.user_name as done_by_name','users.full_name as done_by_fullname','users.uuid as done_by_uuid'])->first();
     }
 
     /**
