@@ -308,7 +308,7 @@ class AuthController extends Controller
             'old_password' => 'sometimes|string',
             'new_password' => 'sometimes|string|min:6',
             'confirm_password' => 'sometimes|string',
-            'full_name' => 'sometimes|string|max:255',
+            'name' => 'sometimes|string|max:255',
         ]);
 
         if ($validator->fails()) {
