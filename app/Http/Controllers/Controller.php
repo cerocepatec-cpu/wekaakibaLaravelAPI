@@ -427,4 +427,50 @@ class Controller extends BaseController
             'nature'=>$nature,
         ]);
     }
+
+    public function detectDevice($userAgent)
+    {
+        if (preg_match('/mobile/i', $userAgent)) return 'Mobile';
+        if (preg_match('/tablet/i', $userAgent)) return 'Tablet';
+        return 'Desktop';
+    }
+
+    public function detectOS($userAgent)
+    {
+        $oses = [
+            'Windows' => '/windows nt/i',
+            'MacOS'   => '/macintosh|mac os x/i',
+            'Linux'   => '/linux/i',
+            'Android' => '/android/i',
+            'iOS'     => '/iphone|ipad/i',
+        ];
+
+        foreach ($oses as $os => $regex) {
+            if (preg_match($regex, $userAgent)) {
+                return $os;
+            }
+        }
+
+        return 'Unknown OS';
+    }
+
+    public function detectBrowser($userAgent)
+    {
+        $browsers = [
+            'Edge'    => '/edge/i',
+            'Chrome'  => '/chrome/i',
+            'Safari'  => '/safari/i',
+            'Firefox' => '/firefox/i',
+            'Opera'   => '/opera|opr/i',
+        ];
+
+        foreach ($browsers as $browser => $regex) {
+            if (preg_match($regex, $userAgent)) {
+                return $browser;
+            }
+        }
+
+        return 'Unknown Browser';
+    }
+
 }

@@ -7,11 +7,14 @@ use Carbon\Carbon;
 use App\Models\User;
 use App\Models\funds;
 use App\Models\moneys;
+use Twilio\Rest\Client;
 use App\Models\Invoices;
 use App\Models\serdipays;
+use App\Helpers\PhoneHelper;
 use Illuminate\Http\Request;
 use App\Models\transactionfee;
 use Barryvdh\DomPDF\Facade\Pdf;
+use Illuminate\Validation\Rule;
 use App\Models\wekafirstentries;
 use App\Models\wekamemberaccounts;
 use Illuminate\Support\Facades\DB;
@@ -19,17 +22,15 @@ use App\Exports\TransactionsExport;
 use App\Http\Controllers\Controller;
 use App\Models\MobileMoneyProviders;
 use Illuminate\Support\Facades\Auth;
+use Illuminate\Support\Facades\Mail;
 use Maatwebsite\Excel\Facades\Excel;
+use Illuminate\Support\Facades\Cache;
+use Illuminate\Support\Facades\Event;
 use App\Models\wekaAccountsTransactions;
+use Illuminate\Pagination\LengthAwarePaginator;
 use App\Http\Requests\StorerequestHistoryRequest;
 use App\Http\Requests\StorewekaAccountsTransactionsRequest;
 use App\Http\Requests\UpdatewekaAccountsTransactionsRequest;
-use App\Helpers\PhoneHelper;
-use Twilio\Rest\Client;
-use Illuminate\Support\Facades\Cache;
-use Illuminate\Support\Facades\Mail;
-use Illuminate\Pagination\LengthAwarePaginator;
-use Illuminate\Support\Facades\Event;
 
 class WekaAccountsTransactionsController extends Controller
 {
@@ -400,8 +401,8 @@ class WekaAccountsTransactionsController extends Controller
     public function getUserTransactions(Request $request)
     {
         $authUser = Auth::user();
+        if(!$authUser) return $this->errorResponse("Utilisateur non authentifié",400);
         $memberId = $authUser->id;
-
         // Validation : tout est nullable sauf per_page
         $request->validate([
             'member_account_ids' => 'nullable|array',
@@ -411,13 +412,22 @@ class WekaAccountsTransactionsController extends Controller
             'type' => 'nullable|string',
             'start_date' => 'nullable|date',
             'end_date' => 'nullable|date',
-            'date_filter' => 'nullable|string|in:
-                today,yesterday,
-                last_7_days,last_30_days,
-                this_week,last_week,
-                this_month,last_month,
-                this_quarter,
-                this_year',
+            'date_filter' => [
+                'nullable',
+                'string',
+                Rule::in([
+                    'today',
+                    'yesterday',
+                    'last_7_days',
+                    'last_30_days',
+                    'this_week',
+                    'last_week',
+                    'this_month',
+                    'last_month',
+                    'this_quarter',
+                    'this_year'
+                ])
+                ],
             'per_page' => 'nullable|integer|min:1',
             'timezone' => 'nullable|string' // pour gérer le fuseau horaire
         ]);

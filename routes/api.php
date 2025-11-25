@@ -140,7 +140,8 @@ Route::middleware(['auth:sanctum'])->group(function () {
     Route::get('/tubs/enterprise/{id}', [FundsController::class,'index']);
     Route::put('/resetpin',[AuthController::class,'resetPin']);
     Route::post('/verify-pin',[AuthController::class, 'verifyPin']);
-    Route::put('/user/update-sensitive-info',[AuthController::class,'updateSensitiveInfo']);
+    // Route::put('/user/update-sensitive-info',[AuthController::class,'updateSensitiveInfo']);
+    Route::put('/user/update-sensitive-info-password',[AuthController::class,'updateSensitiveInfoPassword']);
 
     /** Routes sensibles protégées par check.security */
     Route::middleware(['check.security'])->group(function () {
@@ -209,6 +210,14 @@ Route::middleware(['auth:sanctum'])->group(function () {
     Route::get('/agent/bonus/pending', [AgentBonusController::class, 'pending']);
     Route::post('/agent/bonus/withdraw/currency', [AgentBonusController::class, 'withdrawByCurrency']);
     Route::post('/agent/bonus/withdraw/all', [AgentBonusController::class, 'withdrawAll']);
+
+    Route::post('/weka/accounts/newtranfert',[WekatransfertsaccountsController::class,'sosStore']);
+    Route::prefix('weka/sos-transferts')->group(function () {
+        Route::post('{id}/validate', [WekatransfertsaccountsController::class, 'validateTransfer']);
+        Route::post('{id}/reject', [WekatransfertsaccountsController::class, 'rejectTransfer']);
+    });
+    Route::get('/weka/account/transferts/history',[WekatransfertsaccountsController::class,'getTransfersList']);
+    Route::get('/weka/pending/sos-transferts',[WekatransfertsaccountsController::class,'indexPending']);
         
     });
 
@@ -898,8 +907,6 @@ Route::get('/clear-laravel-cache', function () {
 // Route::post('/weka/removesponsoring',[UsersController::class,'removesponsoring']);
 // Route::get('/weka/memberspaginated/{enterpriseid}',[UsersController::class,'wekamemberslistpaginated']);
 // Route::get('/weka/members-to-validated/enterprise/{id}',[UsersController::class,'wekamemberstovalidate']);
-// Route::post('/weka/accounts/newtranfert',[WekatransfertsaccountsController::class,'store']);
-// Route::get('/weka/account/transferts/history',[WekatransfertsaccountsController::class,'getTransfersList']);
 // Route::post('/weka/financedashboard/{userid}' ,[UsersController::class,'wekafinancedashboard']);
 // Route::post('/weka/pendingWithdrawalAccountTransaction/new',[WekaAccountsTransactionsController::class,'pendingWithdrawalAccountTransaction']);
 // Route::put('/weka/transactions/{wekaAccountsTransactions}', [WekaAccountsTransactionsController::class, 'update']);

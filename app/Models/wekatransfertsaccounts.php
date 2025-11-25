@@ -22,6 +22,7 @@ class wekatransfertsaccounts extends Model
             'conversion_rate',
             'pin',
             'transfert_status',
+            'motif',
         ];
 
         protected $casts = [

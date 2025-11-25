@@ -31,6 +31,7 @@ class CreateWekatransfertsaccountsTable extends Migration
             $table->decimal('conversion_rate', 15, 6)->nullable();
 
             $table->string('pin')->nullable();
+            $table->string('motif')->nullable();
             $table->enum('transfert_status', ['pending', 'validated', 'denied', 'failed'])->default('pending');
 
             $table->timestamps();

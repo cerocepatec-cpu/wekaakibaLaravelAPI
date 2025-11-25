@@ -42,6 +42,38 @@ return [
             'after_commit' => false,
         ],
 
+        /* ================================
+        |   CUSTOM FINTECH QUEUES HERE 🎉
+        |================================ */
+
+        'otp' => [
+            'driver' => 'database',
+            'table' => 'jobs',
+            'queue' => 'otp',
+            'retry_after' => 60,    // OTP shouldn't wait too long
+            'after_commit' => false,
+        ],
+
+        'mail' => [
+            'driver' => 'database',
+            'table' => 'jobs',
+            'queue' => 'mail',
+            'retry_after' => 120,   // emails can take longer
+            'after_commit' => false,
+        ],
+
+        'transactions' => [
+            'driver' => 'database',
+            'table' => 'jobs',
+            'queue' => 'transactions',
+            'retry_after' => 180,   // heavy business logic
+            'after_commit' => false,
+        ],
+
+        /* ================================
+        |  END CUSTOM QUEUES
+        |================================ */
+
         'beanstalkd' => [
             'driver' => 'beanstalkd',
             'host' => 'localhost',

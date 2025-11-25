@@ -17,6 +17,8 @@ use Illuminate\Support\Facades\Log;
 use App\Mail\PasswordResetSuccessMail;
 use App\Models\PasswordReset;
 use Illuminate\Support\Facades\Cache;
+use App\Mail\PasswordChangedSecurityAlert;
+
 
 class AuthController extends Controller
 {
@@ -138,19 +140,6 @@ class AuthController extends Controller
 
         // Génération du token sécurisé Laravel
         $passwordReset=PasswordReset::generateOTP($user->email);
-        // $token = Password::broker()->createToken($user);
-
-        // Génération d’un OTP à 6 chiffres
-        // $code = rand(100000, 999999);
-
-    //    PasswordReset::where('email', $user->email)->delete();
-    //     PasswordReset::create([
-    //         'email' => $user->email,
-    //         'token' => $token,
-    //         'code' => $code,
-    //         'created_at' => now()
-    //     ]);
-
 
         // Envoi selon le type choisi
         if ($request->type === 'email') {
@@ -446,6 +435,103 @@ class AuthController extends Controller
 
         return $this->successResponse('success', $user);
     }
+    
+   public function updateSensitiveInfoPassword(Request $request)
+    {
+        /** @var User $user */
+        $user = Auth::user();
+
+        if (!$user) {
+            return $this->errorResponse('Utilisateur non authentifié', 401);
+        }
+
+        // === COMPTE BLOQUÉ ?
+        if ($user->failed_attempts >= 3) {
+            return $this->errorResponse(
+                "Votre compte est temporairement bloqué après plusieurs tentatives échouées.",
+                423
+            );
+        }
+
+        // === VALIDATION STRICTE ===
+        $validator = Validator::make($request->all(), [
+            'old_password'     => 'required|string',
+            'new_password'     => 'required|string|min:8',
+            'confirm_password' => 'required|string|same:new_password',
+        ]);
+
+        if ($validator->fails()) {
+            return $this->errorResponse($validator->errors()->first(), 422);
+        }
+
+        // === VÉRIFICATION DE L'ANCIEN MOT DE PASSE
+        if (!Hash::check($request->old_password, $user->password)) {
+
+            $user->failed_attempts++;
+            $user->save();
+
+            if ($user->failed_attempts >= 3) {
+                $user->status = 'blocked';
+                $user->save();
+                return $this->errorResponse("Compte bloqué après 3 tentatives échouées.", 423);
+            }
+
+            return $this->errorResponse("Ancien mot de passe incorrect", 422);
+        }
+
+        // reset compteur après succès
+        $user->failed_attempts = 0;
+
+        // === PASSWORD STRENGTH CHECKER
+        $new = $request->new_password;
+
+        if (
+            !preg_match('/[A-Z]/', $new) ||
+            !preg_match('/[a-z]/', $new) ||
+            !preg_match('/[0-9]/', $new) ||
+            !preg_match('/[\W]/', $new)
+        ) {
+            return $this->errorResponse(
+                "Le mot de passe doit contenir au moins : une majuscule, une minuscule, un chiffre et un symbole.",
+                422
+            );
+        }
+
+        // === MISE À JOUR MDP ===
+        $user->password = Hash::make($new);
+
+        // === Génération UUID si manquant
+        if (!$user->uuid && $user->created_at) {
+            $random = substr(uniqid(), -3);
+            $user->uuid = 'GOM'.$user->created_at->format('YdmHis').strtoupper($random);
+        }
+
+        $user->save();
+
+        // --- INFOS SÉCURITÉ ---
+        $ip = $request->ip();
+        $userAgent = $request->header('User-Agent');
+
+        $device  = $this->detectDevice($userAgent);
+        $os      = $this->detectOS($userAgent);
+        $browser = $this->detectBrowser($userAgent);
+
+        // --- ENVOI EMAIL ASYNC APRÈS LA RÉPONSE ---
+        if (!empty($user->email)) {
+            Mail::to($user->email)->queue(
+                new PasswordChangedSecurityAlert(
+                    $user,
+                    $ip,
+                    $device,
+                    $os,
+                    $browser
+                )
+            );
+        }
+
+        return $this->successResponse("success", $user);
+    }
+
 
     // Register
     public function register(Request $request)
