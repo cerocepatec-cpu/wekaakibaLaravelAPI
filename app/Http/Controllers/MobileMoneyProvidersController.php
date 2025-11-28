@@ -303,7 +303,7 @@ class MobileMoneyProvidersController extends Controller
 
                 // Récupérer le token
                 $refreshData = $refresh->json();
-                $newToken = $refreshData['token']['access_token'] ?? null;
+                $newToken = $refreshData['access_token'] ?? null;
 
                 if (!$newToken) {
                     DB::rollBack();
