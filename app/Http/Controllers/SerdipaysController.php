@@ -23,30 +23,56 @@ class SerdipaysController extends Controller
     /**
      * get token for SERDI PAIE integration
      */
-    public function getToken(){
-        $response = Http::post('https://api.serdipay.cloud/api/public-api/v1/merchant/get-token', [
-            'email' => 'kilimbanyifabrice@gmail.com',
-            'password' => 'Paradojacero2021??',
-        ]);
-        return $response;
+     public function getToken()
+    {
+        try {
+            $lastconfig = serdipays::configFor("test");
+        } catch (\Exception $e) {
+            return $this->errorResponse($e->getMessage(), 400);
+        }
+
+        if (!$lastconfig->token_endpoint) {
+            return $this->errorResponse("Token-endpoint non configuré", 400);
+        }
+
+        if (!$lastconfig->email) {
+            return $this->errorResponse("Email non configuré", 400);
+        }
+
+        if (!$lastconfig->password) {
+            return $this->errorResponse("Password non configuré", 400);
+        }
+
+        try {
+            $response = Http::post($lastconfig->token_endpoint, [
+                'email'    => $lastconfig->email,
+                'password' => $lastconfig->password,
+            ]);
+        } catch (\Exception $e) {
+            return $this->errorResponse("Impossible d'appeler le token-endpoint: " . $e->getMessage(), 400);
+        }
 
         $data = $response->json();
-        if ($response->successful()) {
-            $lastconfig=serdipays::latest()->first();
-            if($lastconfig){
-                $lastconfig->update(['token' => $data['token'] ?? null,]);
-            }
-            return response()->json([
-                'status' => 'success',
-                'token' => $data,
-            ]);
-        } else {
-            return response()->json([
-                'status' => 'error',
-                'message' => $data['message'] ?? 'Failed to retrieve token',
-            ], $response->status());
+
+        if (!$response->successful()) {
+            return $this->errorResponse("Impossible de récupérer le token", 400);
         }
+
+        // Sécuriser l'accès au token
+        $token = $data['token']['access_token'] ?? null;
+
+        if (!$token) {
+            return $this->errorResponse("Le token n'a pas été retourné par l'API", 400);
+        }
+
+        // Mise à jour
+        $lastconfig->update([
+            'token' => $token
+        ]);
+
+        return $this->successResponse("success", $token);
     }
+
     /**
      * Show the form for creating a new resource.
      *
