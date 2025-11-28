@@ -28,6 +28,7 @@ class SerdipaysController extends Controller
             'email' => 'kilimbanyifabrice@gmail.com',
             'password' => 'Paradojacero2021??',
         ]);
+        return $response;
 
         $data = $response->json();
         if ($response->successful()) {

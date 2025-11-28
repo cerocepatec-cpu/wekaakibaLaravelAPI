@@ -120,7 +120,7 @@ Route::post('/refresh', [AuthController::class, 'refresh']);
 Route::post('/password/forgot', [AuthController::class, 'forgotPassword']);
 Route::post('/password/verify', [AuthController::class, 'verifyResetCode']);
 Route::post('/password/reset', [AuthController::class, 'resetPassword']);
-Route::post('/serdi/paie/get-token',[SerdipaysController::class,'getToken']);
+Route::get('/serdi/paie/get-token',[SerdipaysController::class,'getToken']);
 
 Route::middleware(['auth:sanctum', 'permission:agents.add'])->post('/weka/members/newmember', [UsersController::class, 'newwekamember']);
 Route::middleware(['auth:sanctum', 'permission:agents.edit'])->group(function () {
