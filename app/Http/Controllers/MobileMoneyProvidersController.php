@@ -181,7 +181,7 @@ class MobileMoneyProvidersController extends Controller
             'amount' => 'required|numeric|min:1',
             'provider_id' => 'required|numeric|min:1',
             'phone_number' => 'nullable|string|max:50',
-            'account_id' => 'required|number|min:1',
+            'account_id' => 'required|numeric|min:1',
             'motif' => 'nullable|string|min:4',
         ]);
 
