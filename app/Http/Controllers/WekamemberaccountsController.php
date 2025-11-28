@@ -65,7 +65,7 @@ class WekamemberaccountsController extends Controller
                 ->get(['M.abreviation as money_abreviation', 'U.user_name', 'wekamemberaccounts.*']);
         }
          
-        return $list;
+        return $this->successResponse("success",$list) ;
     }
 
     public function searchaccountsbyenterprise(Request $request)

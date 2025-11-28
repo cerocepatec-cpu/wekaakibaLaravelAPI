@@ -137,25 +137,6 @@ class User extends Authenticatable implements CanResetPassword
         return collect($this->attributesToArray())->only($selectedFields);
     }
 
-    // public function getNameAttribute() {
-    //     return $this->full_name ?? $this->user_name;
-    // }
-
-    //  protected static function booted()
-    // {
-    //     static::saving(function ($user) {
-    //         // Si name est vide mais full_name existe → copier
-    //         if (empty($user->name) && !empty($user->full_name)) {
-    //             $user->name = $user->full_name;
-    //         }
-
-    //         // Si full_name est vide mais name existe → copier aussi
-    //         if (empty($user->full_name) && !empty($user->name)) {
-    //             $user->full_name = $user->name;
-    //         }
-    //     });
-    // }
-
     public function getEmailForPasswordReset()
     {
         return $this->email;

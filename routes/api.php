@@ -200,6 +200,7 @@ Route::middleware(['auth:sanctum'])->group(function () {
     Route::post('/expenditures/doneby',[ExpendituresController::class,'doneby']);
     Route::get('/weka/transactionspaginated',[WekaAccountsTransactionsController::class,'getTransactionslistByUser']);
     Route::get('/weka/mobilemoneyproviders/enterprise/{id}',[MobileMoneyProvidersController::class,'index']);
+    Route::get('/weka/accounts/depositbymobilemoney',[MobileMoneyProvidersController::class,'depositbymobilemoney']);
 
     Route::get('/closures/{id}', [ClosuresController::class, 'showClosure']);
     Route::get('/closures/show/{id}', [ClosuresController::class, 'show']);
@@ -211,7 +212,7 @@ Route::middleware(['auth:sanctum'])->group(function () {
     Route::post('/agent/bonus/withdraw/currency', [AgentBonusController::class, 'withdrawByCurrency']);
     Route::post('/agent/bonus/withdraw/all', [AgentBonusController::class, 'withdrawAll']);
 
-    Route::post('/weka/accounts/newtranfert',[WekatransfertsaccountsController::class,'sosStore']);
+    Route::post('/weka/accounts/newsostransfert',[WekatransfertsaccountsController::class,'sosStore']);
     Route::prefix('weka/sos-transferts')->group(function () {
         Route::post('{id}/validate', [WekatransfertsaccountsController::class, 'validateTransfer']);
         Route::post('{id}/reject', [WekatransfertsaccountsController::class, 'rejectTransfer']);

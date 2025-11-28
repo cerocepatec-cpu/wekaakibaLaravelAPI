@@ -52,6 +52,16 @@ class wekamemberaccounts extends Model
         }else{
             return true;
         }
+    } 
+
+
+    public function ismine($userId): bool
+    {
+        if ($this->user_id ===$userId) {
+            return true;
+        }else{
+            return false;
+        }
     }
 
     public function money()

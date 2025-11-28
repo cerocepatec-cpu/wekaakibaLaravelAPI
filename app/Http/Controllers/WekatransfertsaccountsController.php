@@ -178,8 +178,6 @@ class WekatransfertsaccountsController extends Controller
                 'motif' => $request->motif,
             ]);
 
-            DB::commit();
-
             // 🔥 NOTIFICATIONS REDIS
             event(new \App\Events\UserRealtimeNotification(
                 $sourceAccount->user_id,
@@ -188,15 +186,18 @@ class WekatransfertsaccountsController extends Controller
                 wekamemberaccounts::getMoneyAbreviationByAccountNumber($sourceAccount->account_number),
                 'success'
             ));
-
-            event(new \App\Events\SosAccountEvent($sourceAccount->user_id, $this->showLite($transfer->id)));
-            event(new \App\Events\SosAccountEvent($destinationAccount->user_id, $this->showLite($transfer->id)));
-
+            $toreturn=$this->showLite($transfer->id);
+            // GIVE SOURCE OWNER ACCOUNT TO VALIDATE 
+            $source_transfer=$toreturn;
+            $source_transfer->can_validate=true;
+            event(new \App\Events\SosAccountEvent($sourceAccount->user_id,$source_transfer));
+            event(new \App\Events\SosAccountEvent($destinationAccount->user_id,$toreturn));
+             DB::commit();
             return response()->json([
                 "status" => 200,
                 "message" => "success",
                 "error" => null,
-                "data" => $this->showLite($transfer->id)
+                "data" =>$toreturn 
             ]);
 
         } catch (\Exception $e) {
@@ -227,7 +228,7 @@ class WekatransfertsaccountsController extends Controller
             ->paginate(10);
 
         $items = collect($ids->items())->map(function ($item) {
-            return $this->showLite($item->id)->original;
+            return $this->showLite($item->id);
         });
 
         return response()->json([
@@ -396,8 +397,7 @@ class WekatransfertsaccountsController extends Controller
 
         // Permission → il doit être propriétaire du compte source
         $transfer->can_validate = ($user->id == $transfer->source_owner_id);
-
-        return response()->json($transfer);
+        return $transfer;
     }
 
    public function validateTransfer($id)
@@ -541,50 +541,53 @@ class WekatransfertsaccountsController extends Controller
             $beneficiaryAccountNumber
         );
 
-            // 🔥 EMAIL BÉNÉFICIAIRE (Validation = dépôt sur le compte destination)
-            $this->sendTransactionEmail(
-                $beneficiaryUser,
-                "Notification de Dépôt",
-                "Vous avez reçu un dépôt suite à une validation de transaction SOS.",
-                $beneficiaryTransaction,
-                0, // Aucun frais
-                $beneficiaryTransaction->sold_before,
-                $destinationAfter,
-                $sourceAccountNumber,
-                $beneficiaryAccountNumber
-            );
+        // 🔥 EMAIL BÉNÉFICIAIRE (Validation = dépôt sur le compte destination)
+        $this->sendTransactionEmail(
+            $beneficiaryUser,
+            "Notification de Dépôt",
+            "Vous avez reçu un dépôt suite à une validation de transaction SOS.",
+            $beneficiaryTransaction,
+            0, // Aucun frais
+            $beneficiaryTransaction->sold_before,
+            $destinationAfter,
+            $sourceAccountNumber,
+            $beneficiaryAccountNumber
+        );
 
 
-            // -------------------------------------------
-            // REALTIME EVENTS
-            // -------------------------------------------
-            $transactionCtrl = new WekaAccountsTransactionsController();
-            event(new \App\Events\UserRealtimeNotification(
-                $beneficiaryUser->id,
-                'Nouveau transfert confirmé',
-                'Vous avez reçu un transfert de '.$amount.' '.wekamemberaccounts::getMoneyAbreviationByAccountNumber($destination->account_number),
-                'success'
-            ));
+        // -------------------------------------------
+        // REALTIME EVENTS
+        // -------------------------------------------
+        $transactionCtrl = new WekaAccountsTransactionsController();
+        event(new \App\Events\UserRealtimeNotification(
+            $beneficiaryUser->id,
+            'Nouveau transfert confirmé',
+            'Vous avez reçu un transfert de '.$amount.' '.wekamemberaccounts::getMoneyAbreviationByAccountNumber($destination->account_number),
+            'success'
+        ));
 
-            event(new \App\Events\TransactionSent(
-                $beneficiaryUser->id,
-                $transactionCtrl->show($beneficiaryTransaction)
-            ));
+        event(new \App\Events\TransactionSent(
+            $beneficiaryUser->id,
+            $transactionCtrl->show($beneficiaryTransaction)
+        ));
 
-            event(new \App\Events\TransactionSent(
-                $source->user_id,
-                $transactionCtrl->show($sourceTransaction)
-            ));
+        event(new \App\Events\TransactionSent(
+            $source->user_id,
+            $transactionCtrl->show($sourceTransaction)
+        ));
 
-            event(new \App\Events\MemberAccountUpdated(
-                $beneficiaryUser->id,
-                $destination
-            ));
+        event(new \App\Events\MemberAccountUpdated(
+            $beneficiaryUser->id,
+            $destination
+        ));
 
-             DB::commit();
-            return $this->successResponse("success", [
-                "validated" => $this->showLite($transfer->id)
-            ]);
+        $toreturn=$this->showLite($transfer->id);
+        $toreturn->can_validate=false;
+        event(new \App\Events\SosAccountUpdateEvent($user->id,$toreturn));
+        event(new \App\Events\SosAccountUpdateEvent($beneficiaryUser->id,$toreturn));
+
+        DB::commit();
+        return $this->successResponse("success",$toreturn);
 
         } catch (\Throwable $e) {
             DB::rollBack();
@@ -668,7 +671,7 @@ class WekatransfertsaccountsController extends Controller
                 $this->sendTransactionEmail(
                     $beneficiaryUser,
                     "Transfert SOS refusé",
-                    "La demande de transfert SOS a été rejetée par le propriétaire du compte source.",
+                    "Votre demande de transfert SOS a été rejetée par le propriétaire du compte source.",
                     null,
                     0,
                     null,
