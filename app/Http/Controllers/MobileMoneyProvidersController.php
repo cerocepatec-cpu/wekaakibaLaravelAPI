@@ -283,26 +283,40 @@ class MobileMoneyProvidersController extends Controller
             ];
            $response = Http::withHeaders($headers)->post($url, $payload);
 
-            if ($response->status() === 401) {
+          if ($response->status() === 401) {
+                // Rafraîchir le token
+                try {
+                    $refresh = Http::post("https://api.serdipay.cloud/api/public-api/v1/merchant/get-token", [
+                        'email'    => 'kilimbanyifabrice@gmail.com',
+                        'password' => 'Paradojacero2021??',
+                    ]);
+                } catch (\Exception $e) {
+                    DB::rollBack();
+                    return $this->errorResponse("Erreur lors de la régénération du token SerdiPay : " . $e->getMessage());
+                }
 
-                // Ré-émission du token
-                $refresh = app(\App\Http\Controllers\SerdipaysController::class)->getToken();
-
-                if ($refresh->getStatusCode() != 200) {
+                // Vérifier si la requête a réussi
+                if (!$refresh->successful()) {
                     DB::rollBack();
                     return $this->errorResponse("Impossible de régénérer le token SerdiPay.");
                 }
 
-                $newToken = json_decode($refresh->getContent(), true)['data'];
+                // Récupérer le token
+                $refreshData = $refresh->json();
+                $newToken = $refreshData['token']['access_token'] ?? null;
 
+                if (!$newToken) {
+                    DB::rollBack();
+                    return $this->errorResponse("Le token renvoyé par SerdiPay est invalide.");
+                }
+
+                // Mise à jour BDD
                 $serdiconfig->update(['token' => $newToken]);
 
-                // Requête avec le token renouvelé
+                // Refaire la requête avec le token mis à jour
                 $headers["Authorization"] = "Bearer {$newToken}";
-
                 $response = Http::withHeaders($headers)->post($url, $payload);
             }
-
            // 11. Vérification finale
             if (!$response->successful()) {
                 DB::rollBack();
