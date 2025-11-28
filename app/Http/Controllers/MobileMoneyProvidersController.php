@@ -185,7 +185,7 @@ class MobileMoneyProvidersController extends Controller
             'motif' => 'nullable|string|min:4',
         ]);
 
-        $affected=$this->userenterpriseaffectation($user->id,$this->getEse($user->id));
+        $affected=$this->getEse($user->id);
         if (!$affected) {
             return $this->errorResponse("Nous n'arrivons pas à vous identifier");
         }
