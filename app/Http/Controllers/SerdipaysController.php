@@ -24,9 +24,9 @@ class SerdipaysController extends Controller
      * get token for SERDI PAIE integration
      */
     public function getToken(){
-        $response = Http::post('https://serdipay.com/api/public-api/v1/merchant/get-token', [
-            'email' => 'contact@cerocepa.com',
-            'password' => '12345@Serdipay',
+        $response = Http::post('https://api.serdipay.cloud/api/public-api/v1/merchant/get-token', [
+            'email' => 'kilimbanyifabrice@gmail.com',
+            'password' => 'Paradojacero2021??',
         ]);
 
         $data = $response->json();
