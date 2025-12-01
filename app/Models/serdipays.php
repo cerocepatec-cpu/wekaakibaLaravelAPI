@@ -70,7 +70,7 @@ class serdipays extends Model
         ];
     }
 
-    public function isCurrencyAllowed(string $currency):bool{
+    public static function isCurrencyAllowed(string $currency):bool{
          return in_array($currency, ['CDF','USD']);
     }
 
