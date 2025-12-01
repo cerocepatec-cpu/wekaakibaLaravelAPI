@@ -381,26 +381,41 @@ class Controller extends BaseController
     }
 
 
-    public function createTransaction($amount,$soldBefore,$soldAfter,$type,$motif,$userId,$memberAccountId,$memberId,$accountId,$operationDoneBy,$fees,$phone,$adresse){
+    public function createTransaction(
+        $amount,
+        $soldBefore,
+        $soldAfter,
+        $type,
+        $motif,
+        $userId,
+        $memberAccountId,
+        $memberId,
+        $accountId,
+        $operationDoneBy,
+        $fees,
+        $phone,
+        $adresse,
+        $status = "validated" // ← nouveau paramètre avec valeur par défaut
+    ) {
         return wekaAccountsTransactions::create([
-            'amount' => $amount,
-            'sold_before' => $soldBefore,
-            'sold_after' => $soldAfter,
-            'type' => $type,
-            'motif' => $motif,
-            'user_id' => $userId,
-            'member_account_id' => $memberAccountId,
-            'member_id' => $memberId,
-            'enterprise_id' =>$this->getEse($userId)['id'],
-            'done_at' =>date('Y-m-d'),
-            'account_id' => $accountId,
-            'operation_done_by' =>$operationDoneBy,
-            'uuid' => $this->getUuId('WT','WK'),
-            'fees' =>$fees,
-            'transaction_status' =>'validated',
-            'phone' => $phone,
-            'adresse' => $adresse,
-        ]); 
+            'amount'             => $amount,
+            'sold_before'        => $soldBefore,
+            'sold_after'         => $soldAfter,
+            'type'               => $type,
+            'motif'              => $motif,
+            'user_id'            => $userId,
+            'member_account_id'  => $memberAccountId,
+            'member_id'          => $memberId,
+            'enterprise_id'      => $this->getEse($userId)['id'],
+            'done_at'            => date('Y-m-d'),
+            'account_id'         => $accountId,
+            'operation_done_by'  => $operationDoneBy,
+            'uuid'               => $this->getUuId('WT', 'WK'),
+            'fees'               => $fees,
+            'transaction_status' => $status,
+            'phone'              => $phone,
+            'adresse'            => $adresse,
+        ]);
     }
 
     public function createLocalRequestHistory($userId,$fundId,$amount,$motif,$type,$requestId,$fenceId,$invoiceId,$sold,$accountId,$beneficiary,$provenance,$fendReceiverId,$expenditureId,$memberAccountId,$nature){

@@ -12,6 +12,7 @@ use App\Models\MobileMoneyProviders;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\Http;
 use App\Http\Requests\StorewekaAccountsTransactionsRequest;
+use App\Models\SerdipaysWebhookLog;
 use App\Models\TransactionFee;
 
 class MobileMoneyProvidersController extends Controller
@@ -316,12 +317,12 @@ class MobileMoneyProvidersController extends Controller
 
         $amount=$request['amount'];
         $totalAmount=$request['amount'];
-        $fees=TransactionFee::calculateFee($amount,$account->money_id,'withdraw');
+        $fees=transactionFee::calculateFee($amount,$account->money_id,'withdraw');
         if(!$fees){
           return $this->errorResponse("Aucun frais de retrait configuré. Veuillez contacter l'admin Système."); 
         }
-
-        $totalAmount=$amount+$fees['fee']+$serdiconfig->b2c_fees;
+        $totalfees=$fees['fee']+$serdiconfig->b2c_fees;
+        $totalAmount=$amount+$totalfees;
         if($totalAmount > $account->sold){
             return $this->errorResponse("Solde du compte membre insuffisant pour effectuer cette opération.");  
         }
@@ -391,8 +392,41 @@ class MobileMoneyProvidersController extends Controller
                 return $this->errorResponse("Requête échouée.".$response->json(),$response->status());
             }
 
-            // DB::commit();
+        
+        $sourceTransaction =$this->createTransaction(
+            $totalAmount,
+            $account->sold,
+            $account->sold+ $totalAmount,
+            "withdraw",
+            $request->motif??null,
+            $user->id,
+            $account->id,
+            $user->id,
+            null,
+            $user->full_name ?: $user->user_name,
+            $totalfees,
+            $user->user_phone,
+            $user->adress,
+            "pending"
+        );
 
+        $wekaId =$sourceTransaction->id;
+        // Création de l’enregistrement
+        $log = SerdipaysWebhookLog::create([
+            'merchantCode'       => $data['merchantCode'] ?? null,
+            'clientPhone'        => $data['clientPhone'] ?? null,
+            'amount'             => $data['amount'] ?? 0,
+            'currency'           => $data['currency'] ?? null,
+            'telecom'            => $data['telecom'] ?? null,
+            'token'              => $data['token'] ?? null,
+            'sessionId'          => $data['sessionId'] ?? null,
+            'sessionStatus'      => $data['sessionStatus'] ?? null,
+            'transactionId'      => $data['transactionId'] ?? null,
+            'wekatransactionId'  => $wekaId,
+            'status'             => 'pending',
+        ]);
+
+        DB::commit();
         return $this->successResponse("success",$response->json());
         } catch (\Exception $e) {
             return $this->errorResponse($e->getMessage(),500);

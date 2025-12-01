@@ -203,6 +203,7 @@ Route::middleware(['auth:sanctum'])->group(function () {
     Route::get('/weka/mobilemoneyproviders/enterprise/{id}',[MobileMoneyProvidersController::class,'index']);
     Route::post('/weka/accounts/depositbymobilemoney',[MobileMoneyProvidersController::class,'depositbymobilemoney']);
     Route::post('/weka/accounts/withdrawbymobilemoney',[MobileMoneyProvidersController::class,'withdrawbymobilemoney']);
+    Route::post('/cerouzisha/serditransactionsfeedback',[SerdipaysController::class,'serditransactionsfeedback']);
 
     Route::get('/closures/{id}', [ClosuresController::class, 'showClosure']);
     Route::get('/closures/show/{id}', [ClosuresController::class, 'show']);
@@ -253,7 +254,6 @@ Route::get('/clear-laravel-cache', function () {
         return '❌ Erreur lors de la suppression des caches : ' . $e->getMessage();
     }
 });
-// Route::post('/cerouzisha/serditransactionsfeedback',[UsersController::class,'serditransactionsfeedback']);
 // Route::get('/storage/uploads/{filename}', function ($filename) {
 //     $path = storage_path("app/public/uploads/{$filename}");
 

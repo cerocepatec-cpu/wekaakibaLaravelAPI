@@ -3,10 +3,14 @@
 namespace App\Http\Controllers;
 
 use App\Models\serdipays;
+use Illuminate\Http\Request;
+use Illuminate\Support\Facades\DB;
+use App\Models\SerdipaysWebhookLog;
 use App\Http\Controllers\Controller;
+use Illuminate\Support\Facades\Http;
+use App\Models\wekaAccountsTransactions;
 use App\Http\Requests\StoreserdipaysRequest;
 use App\Http\Requests\UpdateserdipaysRequest;
-use Illuminate\Support\Facades\Http;
 
 class SerdipaysController extends Controller
 {
@@ -72,6 +76,105 @@ class SerdipaysController extends Controller
 
         return $this->successResponse("success", $token);
     }
+
+    /**
+     * serdi pay feedback transactions
+     */
+   public function serditransactionsfeedback(Request $request)
+{
+    DB::beginTransaction();
+
+    try {
+        // 1) Validation minimale du payload
+        $callback = $request->all();
+
+        if (!isset($callback['payment'])) {
+            return response()->json([
+                "status"  => 400,
+                "message" => "Invalid callback payload",
+                "error"   => "Missing payment object"
+            ], 400);
+        }
+
+        $payment = $callback['payment'];
+
+        // 2) Chercher la transaction dans serdipays_webhook_logs
+        $log = SerdipaysWebhookLog::where('sessionId', $payment['sessionId'])
+            ->orWhere('transactionId', $payment['transactionId'])
+            ->first();
+
+        if (!$log) {
+            return response()->json([
+                "status"  => 404,
+                "message" => "Callback received but transaction not found",
+                "data"    => $payment
+            ], 404);
+        }
+
+        // 3) Mise à jour du statut du webhook log
+        $log->update([
+            'status'        => $payment['status'],     // success | failed
+            'sessionStatus' => $payment['sessionStatus'],
+        ]);
+
+        // 4) Récupérer la transaction WEKA via wekatransactionId
+        $wekaTx = wekaAccountsTransactions::where('uuid', $log->wekatransactionId)->first();
+
+        if (!$wekaTx) {
+            DB::commit();
+
+            return response()->json([
+                "status"  => 404,
+                "message" => "Weka transaction not found",
+                "data"    => $payment
+            ], 404);
+        }
+
+        // 5) Mise à jour du statut de la transaction WEKA
+        // éviter les doubles déductions si un callback est reçu 2 fois
+        if ($wekaTx->transaction_status === "validated" || $wekaTx->transaction_status === "pending") {
+            $wekaTx->update([
+                'transaction_status' => $payment['status'] === "success" ? "validated" : "failed"
+            ]);
+        }
+
+        // 6) Si succès → mettre à jour le solde du compte membre
+        if ($payment['status'] === "success") {
+
+            $memberAccount = $wekaTx->memberAccount;
+
+            if ($memberAccount) {
+                // vérifier idempotence (éviter double retrait)
+                if ($memberAccount->balance >= $log->amount) {
+                    $memberAccount->balance -= $log->amount;
+                    $memberAccount->save();
+                }
+            }
+        }
+
+        DB::commit();
+
+        return response()->json([
+            "status"  => 200,
+            "message" => "Callback processed successfully",
+            "data"    => [
+                "provider"  => $payment,
+                "log"       => $log,
+                "weka_tx"   => $wekaTx
+            ]
+        ]);
+
+    } catch (\Exception $e) {
+
+        DB::rollBack();
+
+        return response()->json([
+            "status"  => 500,
+            "message" => "Internal error",
+            "error"   => $e->getMessage()
+        ], 500);
+    }
+}
 
     /**
      * Show the form for creating a new resource.
