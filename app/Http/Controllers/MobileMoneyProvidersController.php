@@ -423,25 +423,25 @@ class MobileMoneyProvidersController extends Controller
         // Extraction
         $payment = $data['data']['payment'];
 
-        $log = SerdipaysWebhookLog::create([
-            'merchantCode'       => $payment['merchantCode'] ?? null,
-            'clientPhone'        => $payment['clientPhone'] ?? null,
-            'amount'             => $payment['amount'] ?? 0,
-            'currency'           => $payment['currency'] ?? null,
-            'telecom'            => $payment['telecom'] ?? null,
-            'token'              => $payment['token'] ?? null,
-            'sessionId'          => $payment['sessionId'] ?? null,
-            'sessionStatus'      => $payment['sessionStatus'] ?? null,
-            'transactionId'      => $payment['transactionId'] ?? null,
-            'wekatransactionId'  => $wekaId,
-            'status'             => 'pending',
-        ]);
+        // $log = SerdipaysWebhookLog::create([
+        //     'merchantCode'       => $payment['merchantCode'] ?? null,
+        //     'clientPhone'        => $payment['clientPhone'] ?? null,
+        //     'amount'             => $payment['amount'] ?? 0,
+        //     'currency'           => $payment['currency'] ?? null,
+        //     'telecom'            => $payment['telecom'] ?? null,
+        //     'token'              => $payment['token'] ?? null,
+        //     'sessionId'          => $payment['sessionId'] ?? null,
+        //     'sessionStatus'      => $payment['sessionStatus'] ?? null,
+        //     'transactionId'      => $payment['transactionId'] ?? null,
+        //     'wekatransactionId'  => $wekaId,
+        //     'status'             => 'pending',
+        // ]);
 
-        if (!$log) {
-            DB::rollBack();
-            return $this->errorResponse("Impossible de sauvegarder le webhook log");
-        }
-        
+        // if (!$log) {
+        //     DB::rollBack();
+        //     return $this->errorResponse("Impossible de sauvegarder le webhook log");
+        // }
+
         DB::commit();
         return $this->successResponse("success",$response->json());
         } catch (\Exception $e) {
