@@ -202,6 +202,7 @@ Route::middleware(['auth:sanctum'])->group(function () {
     Route::get('/weka/transactionspaginated',[WekaAccountsTransactionsController::class,'getTransactionslistByUser']);
     Route::get('/weka/mobilemoneyproviders/enterprise/{id}',[MobileMoneyProvidersController::class,'index']);
     Route::post('/weka/accounts/depositbymobilemoney',[MobileMoneyProvidersController::class,'depositbymobilemoney']);
+    Route::post('/weka/accounts/withdrawbymobilemoney',[MobileMoneyProvidersController::class,'withdrawbymobilemoney']);
 
     Route::get('/closures/{id}', [ClosuresController::class, 'showClosure']);
     Route::get('/closures/show/{id}', [ClosuresController::class, 'show']);
