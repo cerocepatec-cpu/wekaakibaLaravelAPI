@@ -412,6 +412,7 @@ class MobileMoneyProvidersController extends Controller
 
         $wekaId =$sourceTransaction->id;
         // Création de l’enregistrement
+        $data = $response->json();
         $log = SerdipaysWebhookLog::create([
             'merchantCode'       => $data['merchantCode'] ?? null,
             'clientPhone'        => $data['clientPhone'] ?? null,
@@ -425,6 +426,11 @@ class MobileMoneyProvidersController extends Controller
             'wekatransactionId'  => $wekaId,
             'status'             => 'pending',
         ]);
+
+        if (!$data) {
+                DB::rollBack();
+                return $this->errorResponse("Impossible d'enregistrer le log serdipayswebhooklog");
+        }
 
         DB::commit();
         return $this->successResponse("success",$response->json());
