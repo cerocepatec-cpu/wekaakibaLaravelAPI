@@ -412,26 +412,36 @@ class MobileMoneyProvidersController extends Controller
 
         $wekaId =$sourceTransaction->id;
         // Création de l’enregistrement
-        $data = $response->json();
+       $data = $response->json();
+
+        // Vérifier présence
+        if (!isset($data['data']['payment'])) {
+            DB::rollBack();
+            return $this->errorResponse("Réponse SerdiPay invalide : objet payment manquant.");
+        }
+
+        // Extraction
+        $payment = $data['data']['payment'];
+
         $log = SerdipaysWebhookLog::create([
-            'merchantCode'       => $data['merchantCode'] ?? null,
-            'clientPhone'        => $data['clientPhone'] ?? null,
-            'amount'             => $data['amount'] ?? 0,
-            'currency'           => $data['currency'] ?? null,
-            'telecom'            => $data['telecom'] ?? null,
-            'token'              => $data['token'] ?? null,
-            'sessionId'          => $data['sessionId'] ?? null,
-            'sessionStatus'      => $data['sessionStatus'] ?? null,
-            'transactionId'      => $data['transactionId'] ?? null,
+            'merchantCode'       => $payment['merchantCode'] ?? null,
+            'clientPhone'        => $payment['clientPhone'] ?? null,
+            'amount'             => $payment['amount'] ?? 0,
+            'currency'           => $payment['currency'] ?? null,
+            'telecom'            => $payment['telecom'] ?? null,
+            'token'              => $payment['token'] ?? null,
+            'sessionId'          => $payment['sessionId'] ?? null,
+            'sessionStatus'      => $payment['sessionStatus'] ?? null,
+            'transactionId'      => $payment['transactionId'] ?? null,
             'wekatransactionId'  => $wekaId,
             'status'             => 'pending',
         ]);
 
-        if (!$data) {
-                DB::rollBack();
-                return $this->errorResponse("Impossible d'enregistrer le log serdipayswebhooklog");
+        if (!$log) {
+            DB::rollBack();
+            return $this->errorResponse("Impossible de sauvegarder le webhook log");
         }
-
+        
         DB::commit();
         return $this->successResponse("success",$response->json());
         } catch (\Exception $e) {
