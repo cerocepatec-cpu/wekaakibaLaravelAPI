@@ -12,7 +12,7 @@ use App\Models\Invoices;
 use App\Models\serdipays;
 use App\Helpers\PhoneHelper;
 use Illuminate\Http\Request;
-use App\Models\transactionfee;
+use App\Models\TransactionFee;
 use Barryvdh\DomPDF\Facade\Pdf;
 use Illuminate\Validation\Rule;
 use App\Models\wekafirstentries;
@@ -1552,7 +1552,7 @@ private function financeWithdraw($request)
     DB::beginTransaction();
     try {
         // Mise à jour du solde
-        $fees=transactionfee::calculateFee($amount,$memberAccount->money_id,'withdraw');
+        $fees=TransactionFee::calculateFee($amount,$memberAccount->money_id,'withdraw');
         if(!$fees){
           return $this->errorResponse("Aucun frais de retrait configuré. Veuillez contacter l'admin Système."); 
         }
@@ -1972,7 +1972,7 @@ private function accountToAccount(Request $request){
     //     if(!$user->collection_percentage || $user->collection_percentage<=0){
     //         return $this->errorResponse("Aucun pourcentage de commission configuré pour le collecteur."); 
     //     }
-    //     $fees=transactionfee::calculateFee($amount,$sourceMemberAccount->money_id,'withdraw');
+    //     $fees=TransactionFee::calculateFee($amount,$sourceMemberAccount->money_id,'withdraw');
     //     $payment=($fees['fee']*$user->collection_percentage)/100;
     //     //introduce sauvegarde des commissions recues ici...
     // }
@@ -2121,7 +2121,7 @@ private function accountToAccount(Request $request){
                 return $this->errorResponse("Erreur lors de l'envoi de l'email : " . $e->getMessage());
             }
         }
-        $fees = transactionfee::calculateFee($amount, $source->money_id, 'send');
+        $fees =TransactionFee::calculateFee($amount, $source->money_id, 'send');
         $totalAmount = $amount + $fees['fee'];
         // -----------------------
         // 📄 RÉSUMÉ
@@ -2205,7 +2205,7 @@ private function accountToAccount(Request $request){
         // ----------------------------
         // FEES
         // ----------------------------
-        $fees = transactionfee::calculateFee($amount, $sourceMemberAccount->money_id, 'send');
+        $fees = TransactionFee::calculateFee($amount, $sourceMemberAccount->money_id, 'send');
         $totalAmount = $amount + $fees['fee'];
 
         if ($sourceMemberAccount->sold < $totalAmount) {

@@ -317,7 +317,7 @@ class MobileMoneyProvidersController extends Controller
 
         $amount=$request['amount'];
         $totalAmount=$request['amount'];
-        $fees=transactionFee::calculateFee($amount,$account->money_id,'withdraw');
+        $fees=TransactionFee::calculateFee($amount,$account->money_id,'withdraw');
         if(!$fees){
           return $this->errorResponse("Aucun frais de retrait configuré. Veuillez contacter l'admin Système."); 
         }
