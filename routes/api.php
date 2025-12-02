@@ -121,6 +121,7 @@ Route::post('/password/forgot', [AuthController::class, 'forgotPassword']);
 Route::post('/password/verify', [AuthController::class, 'verifyResetCode']);
 Route::post('/password/reset', [AuthController::class, 'resetPassword']);
 Route::get('/serdi/paie/get-token',[SerdipaysController::class,'getToken']);
+Route::post('/cerouzisha/serditransactionsfeedback',[SerdipaysController::class,'serditransactionsfeedback']);
 
 Route::middleware(['auth:sanctum', 'permission:agents.add'])->post('/weka/members/newmember', [UsersController::class, 'newwekamember']);
 Route::middleware(['auth:sanctum', 'permission:agents.edit'])->group(function () {
@@ -203,8 +204,7 @@ Route::middleware(['auth:sanctum'])->group(function () {
     Route::get('/weka/mobilemoneyproviders/enterprise/{id}',[MobileMoneyProvidersController::class,'index']);
     Route::post('/weka/accounts/depositbymobilemoney',[MobileMoneyProvidersController::class,'depositbymobilemoney']);
     Route::post('/weka/accounts/withdrawbymobilemoney',[MobileMoneyProvidersController::class,'withdrawbymobilemoney']);
-    Route::post('/cerouzisha/serditransactionsfeedback',[SerdipaysController::class,'serditransactionsfeedback']);
-
+   
     Route::get('/closures/{id}', [ClosuresController::class, 'showClosure']);
     Route::get('/closures/show/{id}', [ClosuresController::class, 'show']);
     Route::get('/closures', [ClosuresController::class, 'index']);
