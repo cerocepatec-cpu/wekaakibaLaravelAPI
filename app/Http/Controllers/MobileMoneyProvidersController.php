@@ -406,25 +406,43 @@ class MobileMoneyProvidersController extends Controller
 
         $wekaId = $sourceTransaction->id;
         $data = $response->json();
-        // Cas 1 : Rien du tout
-        if (!$data || !is_array($data)) {
+
+        // Log brut pour comprendre les formes possibles
+        Log::info("SERDIPAY RAW", ['raw' => $response->body()]);
+
+        // 1. Vérifier que la réponse est un array
+        if (!is_array($data) || empty($data)) {
             DB::rollBack();
             return $this->errorResponse("Réponse SerdiPay non valide.", 500);
         }
-        // Cas 2 : data est un JSON string (très fréquent chez eux)
-        if (isset($data['data']) && is_string($data['data'])) {
-            $data['data'] = json_decode($data['data'], true);
-        }
-        // Cas 3 : payment peut être sous data/payment
-        $payment = $data['data']['payment'] ?? $data['payment'] ?? null;
 
+        // 2. Si "data" existe mais est une string JSON → décodage
+        if (isset($data['data']) && is_string($data['data'])) {
+            $decoded = json_decode($data['data'], true);
+            if (json_last_error() === JSON_ERROR_NONE) {
+                $data['data'] = $decoded;
+            }
+        }
+
+        // 3. Récupérer payment depuis toutes les formes possibles
+        $payment = null;
+
+        // Forme standard : data.payment
+        if (isset($data['data']['payment'])) {
+            $payment = $data['data']['payment'];
+        }
+        // Forme alternative : payment directement à la racine
+        elseif (isset($data['payment'])) {
+            $payment = $data['payment'];
+        }
+
+        // 4. Aucun payment trouvé
         if (!$payment) {
-            Log::error("SERDIPAY PAYMENT NOT FOUND", $data);
+            Log::error("SERDIPAY PAYMENT NOT FOUND", ['parsed' => $data]);
             DB::rollBack();
             return $this->errorResponse("Réponse SerdiPay invalide : objet payment manquant.");
         }
 
-        $payment = $data['data']['payment'];
 
         $log = SerdipaysWebhookLog::create([
             'merchantCode'       => $payment['merchantCode'] ?? null,
