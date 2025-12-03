@@ -406,8 +406,20 @@ class MobileMoneyProvidersController extends Controller
 
         $wekaId = $sourceTransaction->id;
         $data = $response->json();
+        // Cas 1 : Rien du tout
+        if (!$data || !is_array($data)) {
+            DB::rollBack();
+            return $this->errorResponse("Réponse SerdiPay non valide.", 500);
+        }
+        // Cas 2 : data est un JSON string (très fréquent chez eux)
+        if (isset($data['data']) && is_string($data['data'])) {
+            $data['data'] = json_decode($data['data'], true);
+        }
+        // Cas 3 : payment peut être sous data/payment
+        $payment = $data['data']['payment'] ?? $data['payment'] ?? null;
 
-        if (!isset($data['data']['payment'])) {
+        if (!$payment) {
+            Log::error("SERDIPAY PAYMENT NOT FOUND", $data);
             DB::rollBack();
             return $this->errorResponse("Réponse SerdiPay invalide : objet payment manquant.");
         }
