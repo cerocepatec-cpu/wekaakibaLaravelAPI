@@ -382,6 +382,7 @@ class MobileMoneyProvidersController extends Controller
             return $this->errorResponse("Requête échouée. " . $respString, $response->status());
         }
 
+         return $this->successResponse("success", $response->json());
         $sourceTransaction = $this->createTransaction(
             $totalAmount,
             $account->sold,
@@ -442,7 +443,6 @@ class MobileMoneyProvidersController extends Controller
             DB::rollBack();
             return $this->errorResponse("Réponse SerdiPay invalide : objet payment manquant.");
         }
-
 
         $log = SerdipaysWebhookLog::create([
             'merchantCode'       => $payment['merchantCode'] ?? null,
