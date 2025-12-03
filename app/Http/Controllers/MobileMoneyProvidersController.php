@@ -382,7 +382,7 @@ class MobileMoneyProvidersController extends Controller
             return $this->errorResponse("Requête échouée. " . $respString, $response->status());
         }
 
-         return $response;
+        //  return $response;
         //   $this->successResponse("success", $response->json());
         $sourceTransaction = $this->createTransaction(
             $totalAmount,
@@ -408,42 +408,30 @@ class MobileMoneyProvidersController extends Controller
 
         $wekaId = $sourceTransaction->id;
         $data = $response->json();
-
-        // Log brut pour comprendre les formes possibles
+        // Log brut (toujours utile)
         Log::info("SERDIPAY RAW", ['raw' => $response->body()]);
 
-        // 1. Vérifier que la réponse est un array
+        // 1. Vérifier que la réponse est un array valide
         if (!is_array($data) || empty($data)) {
             DB::rollBack();
             return $this->errorResponse("Réponse SerdiPay non valide.", 500);
         }
 
-        // 2. Si "data" existe mais est une string JSON → décodage
-        if (isset($data['data']) && is_string($data['data'])) {
-            $decoded = json_decode($data['data'], true);
-            if (json_last_error() === JSON_ERROR_NONE) {
-                $data['data'] = $decoded;
-            }
-        }
-
-        // 3. Récupérer payment depuis toutes les formes possibles
-        $payment = null;
-
-        // Forme standard : data.payment
-        if (isset($data['data']['payment'])) {
-            $payment = $data['data']['payment'];
-        }
-        // Forme alternative : payment directement à la racine
-        elseif (isset($data['payment'])) {
+        // 2. Si "payment" est à la racine → on le prend
+        if (isset($data['payment'])) {
             $payment = $data['payment'];
         }
-
-        // 4. Aucun payment trouvé
-        if (!$payment) {
+        // 3. Sinon, s'il est dans "data"
+        elseif (isset($data['data']['payment'])) {
+            $payment = $data['data']['payment'];
+        }
+        // 4. Aucun payment trouvé → erreur
+        else {
             Log::error("SERDIPAY PAYMENT NOT FOUND", ['parsed' => $data]);
             DB::rollBack();
-            return $this->errorResponse("Réponse SerdiPay invalide : objet payment manquant.");
+            return $this->errorResponse("Réponse SerdiPay invalide : objet 'payment' manquant.", 500);
         }
+
 
         $log = SerdipaysWebhookLog::create([
             'merchantCode'       => $payment['merchantCode'] ?? null,
