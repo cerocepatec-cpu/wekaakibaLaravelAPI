@@ -151,6 +151,15 @@ class MobileMoneyProvidersController extends Controller
             return $this->errorResponse('Monnaie non autorisée pour le réseau mobile envoyé. Veuillez contacter votre administrateur pour des explications plus détaillées!');
         }
 
+         $amount = $request['amount'];
+        $totalAmount = $request['amount'];
+        $fees = TransactionFee::calculateFee($amount, $account->money_id, 'send');
+        if (!$fees) {
+            return $this->errorResponse("Aucun frais de retrait configuré. Veuillez contacter l'admin Système.");
+        }
+        $totalfees = $fees['fee'] + $serdiconfig->b2c_fees;
+        $totalAmount = $amount + $totalfees;
+
         $payload = [
             "api_id"       => $serdiconfig->merchant_api_id,
             "api_password" => $serdiconfig->password,
@@ -212,11 +221,82 @@ class MobileMoneyProvidersController extends Controller
             }
            // 11. Vérification finale
             if (!$response->successful()) {
+                 // NE PAS concaténer un tableau — utiliser json_encode ou body()
+                $respBody = $response->json();
+                $respString = is_array($respBody) ? json_encode($respBody) : (string)$response->body();
                 DB::rollBack();
-                return $this->errorResponse("Requête échouée.".$response->json(),$response->status());
+                return $this->errorResponse("Requête échouée. " . $respString, $response->status());
             }
 
-            // DB::commit();
+            $sourceTransaction = $this->createTransaction(
+            $totalAmount,
+            $account->sold,
+            $account->sold + $totalAmount,
+            "withdraw",
+            $request->motif ?? null,
+            $user->id,
+            $account->id,
+            $user->id,
+            null,
+            $user->full_name ?: $user->user_name,
+            $totalfees,
+            $user->user_phone,
+            $user->adress,
+            "pending"
+        );
+
+        if (!$sourceTransaction) {
+            DB::rollBack();
+            return $this->errorResponse("Impossible d'enregistrer l'historique de la transaction.");
+        }
+
+        $wekaId = $sourceTransaction->id;
+        $data = $response->json();
+        // Log brut (toujours utile)
+        Log::info("SERDIPAY RAW", ['raw' => $response->body()]);
+
+        // 1. Vérifier que la réponse est un array valide
+        if (!is_array($data) || empty($data)) {
+            DB::rollBack();
+            return $this->errorResponse("Réponse SerdiPay non valide.", 500);
+        }
+
+        // 2. Si "payment" est à la racine → on le prend
+        if (isset($data['payment'])) {
+            $payment = $data['payment'];
+        }
+        // 3. Sinon, s'il est dans "data"
+        elseif (isset($data['data']['payment'])) {
+            $payment = $data['data']['payment'];
+        }
+        // 4. Aucun payment trouvé → erreur
+        else {
+            Log::error("SERDIPAY PAYMENT NOT FOUND", ['parsed' => $data]);
+            DB::rollBack();
+            return $this->errorResponse("Réponse SerdiPay invalide : objet 'payment' manquant.", 500);
+        }
+
+
+        $log = SerdipaysWebhookLog::create([
+            'merchantCode'       => $payment['merchantCode'] ?? null,
+            'clientPhone'        => $payment['clientPhone'] ?? null,
+            'amount'             => $payment['amount'] ?? 0,
+            'currency'           => $payment['currency'] ?? null,
+            'telecom'            => $payment['telecom'] ?? null,
+            'token'              => $payment['token'] ?? null,
+            'sessionId'          => $payment['sessionId'] ?? null,
+            'sessionStatus'      => $payment['sessionStatus'] ?? null,
+            'transactionId'      => $payment['transactionId'] ?? null,
+            'wekatransactionId'  => $wekaId,
+            'status'             => 'pending',
+        ]);
+
+        if (!$log) {
+            DB::rollBack();
+            return $this->errorResponse("Impossible de sauvegarder le webhook log");
+        }
+
+            DB::commit();
 
         return $this->successResponse("success",$response->json());
         } catch (\Exception $e) {
@@ -382,8 +462,6 @@ class MobileMoneyProvidersController extends Controller
             return $this->errorResponse("Requête échouée. " . $respString, $response->status());
         }
 
-        //  return $response;
-        //   $this->successResponse("success", $response->json());
         $sourceTransaction = $this->createTransaction(
             $totalAmount,
             $account->sold,
