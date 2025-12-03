@@ -5,15 +5,16 @@ namespace App\Http\Controllers;
 use App\Models\User;
 use App\Models\serdipays;
 use Illuminate\Http\Request;
+use App\Models\TransactionFee;
 use App\Models\wekamemberaccounts;
 use Illuminate\Support\Facades\DB;
+use App\Models\SerdipaysWebhookLog;
+use Illuminate\Support\Facades\Log;
 use App\Http\Controllers\Controller;
 use App\Models\MobileMoneyProviders;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\Http;
 use App\Http\Requests\StorewekaAccountsTransactionsRequest;
-use App\Models\SerdipaysWebhookLog;
-use App\Models\TransactionFee;
 
 class MobileMoneyProvidersController extends Controller
 {
@@ -227,233 +228,225 @@ class MobileMoneyProvidersController extends Controller
         }
     }
     
-    public function withdrawbymobilemoney(Request $request)
-    {
-        $user=Auth::user();
-        if (!$user) {
-          return $this->errorResponse("Vous n'êtes pas authentifié. Désolé.",400);  # code...
+ public function withdrawbymobilemoney(Request $request)
+{
+    $user = Auth::user();
+    if (!$user) {
+        return $this->errorResponse("Vous n'êtes pas authentifié. Désolé.", 400);
+    }
+
+    if ($user->status != "enabled") {
+        return $this->errorResponse("Votre compte est désactivé", 400);
+    }
+
+    $request->validate([
+        'amount' => 'required|numeric|min:1',
+        'provider_id' => 'required|numeric|min:1',
+        'phone_number' => 'nullable|string|max:50',
+        'account_id' => 'required|numeric|min:1',
+        'motif' => 'nullable|string|min:4',
+    ]);
+
+    $affected = $this->getEse($user->id);
+    if (!$affected) {
+        return $this->errorResponse("Nous n'arrivons pas à vous identifier");
+    }
+
+    $account = wekamemberaccounts::find($request['account_id']);
+    if (!$account || !$account->isAvailable()) {
+        return $this->errorResponse("Nous n'avons pas pu vérifier votre compte WEKA AKIBA", 400);
+    }
+
+    if (!$account->ismine($user->id)) {
+        return $this->errorResponse("Le compte WEKA AKIBA envoyé n'est pas le vôtre", 400);
+    }
+
+    $clientPhone = $request['phone_number'];
+    if (!$clientPhone) {
+        return $this->errorResponse("Le numero de telephone n'est pas envoyé", 400);
+    }
+
+    $actualuser = User::find($user->id);
+    $provider = MobileMoneyProviders::find($request->provider_id);
+    if (!$provider) {
+        return $this->errorResponse("Le fournisseur mobile n'est pas envoyé", 400);
+    }
+
+    try {
+        $serdiconfig = serdipays::configFor("test");
+    } catch (\Exception $e) {
+        return $this->errorResponse($e->getMessage(), 400);
+    }
+
+    $requiredFields = [
+        'b2c_fees',
+        'merchant_payment_endpoint',
+        'merchant_api_id',
+        'password',
+        'merchantCode',
+        'merchant_pin'
+    ];
+
+    $check = $serdiconfig->checkRequiredFields($requiredFields);
+
+    if (!$check['ok']) {
+        return $this->errorResponse("Le champ '{$check['field']}' n'est pas configuré.", 400);
+    }
+
+    $url = $serdiconfig->merchant_payment_endpoint;
+    $currency = $account->getMoneyAbreviationByAccountNumber($account->account_number);
+
+    if (!$currency) {
+        return $this->errorResponse('Monnaie indisponible pour le compte actuel.');
+    }
+
+    if (!serdipays::isCurrencyAllowed($currency)) {
+        return $this->errorResponse('Monnaie non autorisée pour le réseau mobile envoyé. Veuillez contacter votre administrateur pour des explications plus détaillées!');
+    }
+
+    $amount = $request['amount'];
+    $totalAmount = $request['amount'];
+    $fees = TransactionFee::calculateFee($amount, $account->money_id, 'withdraw');
+    if (!$fees) {
+        return $this->errorResponse("Aucun frais de retrait configuré. Veuillez contacter l'admin Système.");
+    }
+    $totalfees = $fees['fee'] + $serdiconfig->b2c_fees;
+    $totalAmount = $amount + $totalfees;
+    if ($totalAmount > $account->sold) {
+        return $this->errorResponse("Solde du compte membre insuffisant pour effectuer cette opération.");
+    }
+
+    $payload = [
+        "api_id"       => $serdiconfig->merchant_api_id,
+        "api_password" => $serdiconfig->password,
+        "merchantCode" => $serdiconfig->merchantCode,
+        "merchant_pin" => $serdiconfig->merchant_pin,
+        "clientPhone"  => $clientPhone,
+        "amount"       => $amount,
+        "currency"     => $currency,
+        "telecom"      => $provider->provider,
+    ];
+
+    // DÉBUT: nouvelle gestion transactionnelle et try amélioré
+    DB::beginTransaction();
+    try {
+        $account = wekamemberaccounts::find($request['account_id']);
+        if (!$account || $account->account_status != 'enabled') {
+            DB::rollBack();
+            return $this->errorResponse('Votre compte est indisponible pour le moment.');
         }
 
-        if ($user->status!="enabled") {
-           return $this->errorResponse("Votre compte est désactivé",400);  # 
-        }
-
-        $request->validate([
-            'amount' => 'required|numeric|min:1',
-            'provider_id' => 'required|numeric|min:1',
-            'phone_number' => 'nullable|string|max:50',
-            'account_id' => 'required|numeric|min:1',
-            'motif' => 'nullable|string|min:4',
-        ]);
-
-        $affected=$this->getEse($user->id);
-        if (!$affected) {
-            return $this->errorResponse("Nous n'arrivons pas à vous identifier");
-        }
-
-        $account=wekamemberaccounts::find($request['account_id']);
-        if (!$account || !$account->isAvailable()) {
-            return $this->errorResponse("Nous n'avons pas pu vérifier votre compte WEKA AKIBA",400);  # 
-        }
-
-        if (!$account->ismine($user->id)) {
-            return $this->errorResponse("Le compte WEKA AKIBA envoyé n'est pas le vôtre",400);
-        }
-
-        $clientPhone=$request['phone_number'];
-        if (!$clientPhone) {
-            return $this->errorResponse("Le numero de telephone n'est pas envoyé",400);
-        }
-
-        $actualuser=User::find($user->id);
-        $provider=MobileMoneyProviders::find($request->provider_id);
-        if (!$provider) {
-            return $this->errorResponse("Le fournisseur mobile n'est pas envoyé",400);
-        }
-
-        // $config = $actualuser->getMobileMoneyProviderConfigDetails($request->provider_id);
-
-        // if ($config) {
-        //     $clientPhone=$config->phone_number ?: $request->phone_number;
-        //     if (!$clientPhone) {
-        //         return $this->errorResponse('Aucun numero de téléphone trouvé.');
-        //     }
-        // }
-
-        try {
-            $serdiconfig = serdipays::configFor("test");
-        } catch (\Exception $e) {
-            return $this->errorResponse($e->getMessage(), 400);
-        }
-
-        // Champs obligatoires
-        $requiredFields = [
-            'b2c_fees',
-            'merchant_payment_endpoint',
-            'merchant_api_id',
-            'password',
-            'merchantCode',
-            'merchant_pin'
-        ];
-
-        // Vérification
-        $check = $serdiconfig->checkRequiredFields($requiredFields);
-
-        if (!$check['ok']) {
-            return $this->errorResponse("Le champ '{$check['field']}' n'est pas configuré.", 400);
-        }
-
-        // Maintenant tu es sûr que tout est rempli
-        $url = $serdiconfig->merchant_payment_endpoint;
-        $currency=$account->getMoneyAbreviationByAccountNumber($account->account_number);
-
-        if (!$currency) {
-            return $this->errorResponse('Monnaie indisponible pour le compte actuel.');
-        }
-
-        if(!serdipays::isCurrencyAllowed($currency)){
-            return $this->errorResponse('Monnaie non autorisée pour le réseau mobile envoyé. Veuillez contacter votre administrateur pour des explications plus détaillées!');
-        }
-
-        $amount=$request['amount'];
-        $totalAmount=$request['amount'];
-        $fees=TransactionFee::calculateFee($amount,$account->money_id,'withdraw');
-        if(!$fees){
-          return $this->errorResponse("Aucun frais de retrait configuré. Veuillez contacter l'admin Système."); 
-        }
-        $totalfees=$fees['fee']+$serdiconfig->b2c_fees;
-        $totalAmount=$amount+$totalfees;
-        if($totalAmount > $account->sold){
-            return $this->errorResponse("Solde du compte membre insuffisant pour effectuer cette opération.");  
-        }
-
-        $payload = [
-            "api_id"       => $serdiconfig->merchant_api_id,
-            "api_password" => $serdiconfig->password,
-            "merchantCode" => $serdiconfig->merchantCode,
-            "merchant_pin" => $serdiconfig->merchant_pin,
-            "clientPhone"  => $clientPhone,
-            "amount"       => $amount,
-            "currency"     =>$currency,
-            "telecom"      => $provider->provider,
-        ];
-
-        try {
-            $account =wekamemberaccounts::find($request['account_id']);
-            if (!$account || $account->account_status!='enabled') {
-                return $this->errorResponse('Votre compte est indisponible pour le moment.');
-            }
-
-            $token = $serdiconfig->token;
-            $headers = [
+        $token = $serdiconfig->token;
+        $headers = [
             "Authorization" => "Bearer {$token}",
             "Accept" => "application/json"
-            ];
-            
-           $response = Http::withHeaders($headers)->post($url, $payload);
+        ];
 
-          if ($response->status() === 401) {
-                // Rafraîchir le token
-                try {
-                    $refresh = Http::post($serdiconfig->token_endpoint, [
-                        'email'    => $serdiconfig->email,
-                        'password' =>$serdiconfig->password,
-                    ]);
-                } catch (\Exception $e) {
-                    DB::rollBack();
-                    return $this->errorResponse("Erreur lors de la régénération du token SerdiPay : " . $e->getMessage());
-                }
+        $response = Http::withHeaders($headers)->post($url, $payload);
 
-                // Vérifier si la requête a réussi
-                if (!$refresh->successful()) {
-                    DB::rollBack();
-                    return $this->errorResponse("Impossible de régénérer le token SerdiPay.");
-                }
-
-                // Récupérer le token
-                $refreshData = $refresh->json();
-                $newToken = $refreshData['access_token'] ?? null;
-
-                if (!$newToken) {
-                    DB::rollBack();
-                    return $this->errorResponse("Le token renvoyé par SerdiPay est invalide.");
-                }
-
-                // Mise à jour BDD
-                $serdiconfig->update(['token' => $newToken]);
-
-                // Refaire la requête avec le token mis à jour
-                $headers["Authorization"] = "Bearer {$newToken}";
-                $response = Http::withHeaders($headers)->post($url, $payload);
-            }
-           // 11. Vérification finale
-            if (!$response->successful()) {
+        if ($response->status() === 401) {
+            try {
+                $refresh = Http::post($serdiconfig->token_endpoint, [
+                    'email' => $serdiconfig->email,
+                    'password' => $serdiconfig->password,
+                ]);
+            } catch (\Exception $e) {
                 DB::rollBack();
-                return $this->errorResponse("Requête échouée.".$response->json(),$response->status());
+                return $this->errorResponse("Erreur lors de la régénération du token SerdiPay : " . $e->getMessage());
             }
 
-        
-            $sourceTransaction =$this->createTransaction(
-                $totalAmount,
-                $account->sold,
-                $account->sold+ $totalAmount,
-                "withdraw",
-                $request->motif??null,
-                $user->id,
-                $account->id,
-                $user->id,
-                null,
-                $user->full_name ?: $user->user_name,
-                $totalfees,
-                $user->user_phone,
-                $user->adress,
-                "pending"
-            );
-
-            if(!$sourceTransaction){
+            if (!$refresh->successful()) {
                 DB::rollBack();
-                return $this->errorResponse("Impossible d'enregistrer l'historique de la transaction.");
+                return $this->errorResponse("Impossible de régénérer le token SerdiPay.");
             }
-           
-            $wekaId =$sourceTransaction->id;
-            // Création de l’enregistrement
-            $data = $response->json();
 
-            // Vérifier présence
-            if (!isset($data['data']['payment'])) {
+            $refreshData = $refresh->json();
+            $newToken = $refreshData['access_token'] ?? null;
+
+            if (!$newToken) {
                 DB::rollBack();
-                return $this->errorResponse("Réponse SerdiPay invalide : objet payment manquant.");
+                return $this->errorResponse("Le token renvoyé par SerdiPay est invalide.");
             }
 
-            // Extraction
-            $payment = $data['data']['payment'];
+            $serdiconfig->update(['token' => $newToken]);
 
-            $log = SerdipaysWebhookLog::create([
-                'merchantCode'       => $payment['merchantCode'] ?? null,
-                'clientPhone'        => $payment['clientPhone'] ?? null,
-                'amount'             => $payment['amount'] ?? 0,
-                'currency'           => $payment['currency'] ?? null,
-                'telecom'            => $payment['telecom'] ?? null,
-                'token'              => $payment['token'] ?? null,
-                'sessionId'          => $payment['sessionId'] ?? null,
-                'sessionStatus'      => $payment['sessionStatus'] ?? null,
-                'transactionId'      => $payment['transactionId'] ?? null,
-                'wekatransactionId'  => $wekaId,
-                'status'             => 'pending',
-            ]);
-
-            if (!$log) {
-                DB::rollBack();
-                return $this->errorResponse("Impossible de sauvegarder le webhook log");
-            }
-            
-            DB::commit();
-            return $this->successResponse("success",$response->json());
-       
-        } catch (\Exception $e) {
-            return $this->errorResponse($e->getMessage(),500);
+            $headers["Authorization"] = "Bearer {$newToken}";
+            $response = Http::withHeaders($headers)->post($url, $payload);
         }
+
+        if (!$response->successful()) {
+            // NE PAS concaténer un tableau — utiliser json_encode ou body()
+            $respBody = $response->json();
+            $respString = is_array($respBody) ? json_encode($respBody) : (string)$response->body();
+            DB::rollBack();
+            return $this->errorResponse("Requête échouée. " . $respString, $response->status());
+        }
+
+        $sourceTransaction = $this->createTransaction(
+            $totalAmount,
+            $account->sold,
+            $account->sold + $totalAmount,
+            "withdraw",
+            $request->motif ?? null,
+            $user->id,
+            $account->id,
+            $user->id,
+            null,
+            $user->full_name ?: $user->user_name,
+            $totalfees,
+            $user->user_phone,
+            $user->adress,
+            "pending"
+        );
+
+        if (!$sourceTransaction) {
+            DB::rollBack();
+            return $this->errorResponse("Impossible d'enregistrer l'historique de la transaction.");
+        }
+
+        $wekaId = $sourceTransaction->id;
+        $data = $response->json();
+
+        if (!isset($data['data']['payment'])) {
+            DB::rollBack();
+            return $this->errorResponse("Réponse SerdiPay invalide : objet payment manquant.");
+        }
+
+        $payment = $data['data']['payment'];
+
+        $log = SerdipaysWebhookLog::create([
+            'merchantCode'       => $payment['merchantCode'] ?? null,
+            'clientPhone'        => $payment['clientPhone'] ?? null,
+            'amount'             => $payment['amount'] ?? 0,
+            'currency'           => $payment['currency'] ?? null,
+            'telecom'            => $payment['telecom'] ?? null,
+            'token'              => $payment['token'] ?? null,
+            'sessionId'          => $payment['sessionId'] ?? null,
+            'sessionStatus'      => $payment['sessionStatus'] ?? null,
+            'transactionId'      => $payment['transactionId'] ?? null,
+            'wekatransactionId'  => $wekaId,
+            'status'             => 'pending',
+        ]);
+
+        if (!$log) {
+            DB::rollBack();
+            return $this->errorResponse("Impossible de sauvegarder le webhook log");
+        }
+
+        DB::commit();
+        return $this->successResponse("success", $response->json());
+
+    } catch (\Exception $e) {
+        DB::rollBack();
+        // Log détaillé pour debug
+        Log::error('withdrawbymobilemoney error: '.$e->getMessage(), [
+            'exception' => $e,
+            'payload' => $payload,
+        ]);
+        return $this->errorResponse($e->getMessage(), 500);
     }
+}
+
 
     public function depositbymobilemoneydraft(Request $request)
     {
