@@ -151,13 +151,13 @@ class MobileMoneyProvidersController extends Controller
             return $this->errorResponse('Monnaie non autorisée pour le réseau mobile envoyé. Veuillez contacter votre administrateur pour des explications plus détaillées!');
         }
 
-         $amount = $request['amount'];
+        $amount = $request['amount'];
         $totalAmount = $request['amount'];
         $fees = TransactionFee::calculateFee($amount, $account->money_id, 'send');
         if (!$fees) {
             return $this->errorResponse("Aucun frais de retrait configuré. Veuillez contacter l'admin Système.");
         }
-        $totalfees = $fees['fee'] + $serdiconfig->b2c_fees;
+        $totalfees = $fees['fee'] + $serdiconfig->c2c_fees;
         $totalAmount = $amount + $totalfees;
 
         $payload = [
@@ -232,7 +232,7 @@ class MobileMoneyProvidersController extends Controller
             $totalAmount,
             $account->sold,
             $account->sold + $totalAmount,
-            "withdraw",
+            "entry",
             $request->motif ?? null,
             $user->id,
             $account->id,

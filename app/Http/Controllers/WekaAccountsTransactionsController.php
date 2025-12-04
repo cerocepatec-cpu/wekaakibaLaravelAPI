@@ -12,6 +12,7 @@ use App\Models\Invoices;
 use App\Models\serdipays;
 use App\Helpers\PhoneHelper;
 use Illuminate\Http\Request;
+use App\Services\FeesService;
 use App\Models\TransactionFee;
 use Barryvdh\DomPDF\Facade\Pdf;
 use Illuminate\Validation\Rule;
@@ -19,6 +20,7 @@ use App\Models\wekafirstentries;
 use App\Models\wekamemberaccounts;
 use Illuminate\Support\Facades\DB;
 use App\Exports\TransactionsExport;
+use Illuminate\Support\Facades\Log;
 use App\Http\Controllers\Controller;
 use App\Models\MobileMoneyProviders;
 use Illuminate\Support\Facades\Auth;
@@ -1354,6 +1356,50 @@ class WekaAccountsTransactionsController extends Controller
         } catch (\Exception $e) {
             DB::rollBack();
             return $this->errorResponse($e->getMessage(), 500);
+        }
+    }
+
+    public function getTransactionFees(Request $request, FeesService $feesService)
+    {
+        // 1️⃣ Validation
+        $request->validate([
+            'amount'     => 'required|numeric|min:1',
+            'account_id' => 'required|numeric|min:1',
+            'type'       => 'required|string|in:mobile_withdraw,mobile_deposit,account_to_account',
+        ]);
+
+        try {
+            // 2️⃣ Récupération des données
+            $amount     = $request->amount;
+            $account_id = $request->account_id;
+            $type       = $request->type;
+
+            // 3️⃣ Calcul des frais
+            $fees = $feesService->gettingTransactionFees($amount, $account_id, $type);
+
+            // 4️⃣ Réponse
+            return response()->json([
+                'status'  => 'success',
+                'message' => 'Frais calculés avec succès.',
+                'data'    => [
+                    'amount' => $amount,
+                    'fees'   => $fees,
+                    'total'  => $amount + $fees
+                ]
+            ], 200);
+
+        } catch (\Exception $e) {
+
+            Log::error("FEES CALC ERROR", [
+                'exception' => $e,
+                'message' => $e->getMessage()
+            ]);
+
+            return response()->json([
+                'status'  => 'error',
+                'message' => 'Impossible de calculer les frais.',
+                'error'   => $e->getMessage()
+            ], 500);
         }
     }
 
