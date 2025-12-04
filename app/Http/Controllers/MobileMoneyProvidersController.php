@@ -298,7 +298,7 @@ class MobileMoneyProvidersController extends Controller
 
             DB::commit();
 
-        return $this->successResponse("success",$response->json());
+        return $this->successResponse("success",$sourceTransaction);
         } catch (\Exception $e) {
             return response()->json([
                 'status' => 'error',
@@ -531,7 +531,7 @@ class MobileMoneyProvidersController extends Controller
         }
 
         DB::commit();
-        return $this->successResponse("success", $response->json());
+        return $this->successResponse("success",$sourceTransaction );
 
     } catch (\Exception $e) {
         DB::rollBack();

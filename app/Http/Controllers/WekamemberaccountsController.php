@@ -60,9 +60,9 @@ class WekamemberaccountsController extends Controller
         
         if ($actualuser) {
             $list= wekamemberaccounts::leftjoin('users as U', 'wekamemberaccounts.user_id','=','U.id')
-                ->leftjoin('moneys as M', 'wekamemberaccounts.money_id','=','M.id')
-                ->where('user_id','=',$user)
-                ->get(['M.abreviation as money_abreviation', 'U.user_name', 'wekamemberaccounts.*']);
+            ->leftjoin('moneys as M', 'wekamemberaccounts.money_id','=','M.id')
+            ->where('user_id','=',$user)
+            ->get(['M.abreviation as money_abreviation', 'U.user_name', 'wekamemberaccounts.*']);
         }
          
         return $this->successResponse("success",$list) ;

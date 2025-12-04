@@ -118,14 +118,15 @@ class SerdipaysController extends Controller
         ]);
 
         // 4) Récupérer la transaction WEKA via wekatransactionId
-        $wekaTx = wekaAccountsTransactions::where('uuid', $log->wekatransactionId)->first();
+        $wekaTx = wekaAccountsTransactions::where('id', $log->wekatransactionId)->first();
 
         if (!$wekaTx) {
             DB::commit();
 
             return response()->json([
                 "status"  => 404,
-                "message" => "Weka transaction not found",
+                "error" => "Weka transaction not found",
+                "message" => "error",
                 "data"    => $payment
             ], 404);
         }
@@ -144,11 +145,28 @@ class SerdipaysController extends Controller
             $memberAccount = $wekaTx->memberAccount;
 
             if ($memberAccount) {
-                // vérifier idempotence (éviter double retrait)
-                if ($memberAccount->balance >= $log->amount) {
-                    $memberAccount->balance -= $log->amount;
+              if ( $wekaTx->type=="withdraw") {
+                if ($memberAccount->sold >= $log->amount) {
+                    $memberAccount->sold -= $log->amount;
                     $memberAccount->save();
                 }
+              }  
+              
+                if ( $wekaTx->type=="entry") {
+                        $memberAccount->sold += $log->amount;
+                        $memberAccount->save();
+                }
+
+                $transactionCtrl = new WekaAccountsTransactionsController();
+                event(new \App\Events\TransactionUpdateEvent(
+                    $memberAccount->user_id,
+                    $transactionCtrl->show($wekaTx)
+                ));
+
+                event(new \App\Events\MemberAccountUpdated(
+                    $memberAccount->user_id,
+                    $memberAccount
+                )); 
             }
         }
 
@@ -156,12 +174,8 @@ class SerdipaysController extends Controller
 
         return response()->json([
             "status"  => 200,
-            "message" => "Callback processed successfully",
-            "data"    => [
-                "provider"  => $payment,
-                "log"       => $log,
-                "weka_tx"   => $wekaTx
-            ]
+            "message" => "success",
+            "data"    => ["log"=> $log]
         ]);
 
     } catch (\Exception $e) {

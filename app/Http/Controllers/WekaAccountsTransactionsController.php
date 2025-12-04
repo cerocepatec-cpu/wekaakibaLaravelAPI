@@ -1864,6 +1864,24 @@ private function cashToVirtual(Request $request){
             $user->adress?? null
         );
         DB::commit();
+
+        event(new \App\Events\UserRealtimeNotification(
+            $memberAccount->user_id,
+            'Nouveau dépôt',
+            'Vous avez reçu un dépôt de '.$amount.' '.wekamemberaccounts::getMoneyAbreviationByAccountNumber($memberAccount->account_number),
+            'success'
+        )); 
+        
+        event(new \App\Events\MemberAccountUpdated(
+            $memberAccount->user_id,
+            $memberAccount
+        )); 
+        
+        event(new \App\Events\TransactionSent(
+            $memberAccount->user_id,
+            $this->show($transaction)
+        ));
+
         return $this->successResponse('success',$this->show($transaction));
     }catch (\Exception $e){
         DB::rollBack();
@@ -1945,7 +1963,7 @@ private function tubToAccount(Request $request){
     $memberAccount->save();
     $memberAccountsoldafter=$memberAccount->sold;   
         
-    $this->createTransaction(
+    $memberTransaction=$this->createTransaction(
         $amount,
         $memberAccountsoldbefore,
         $memberAccountsoldafter,
@@ -1960,6 +1978,26 @@ private function tubToAccount(Request $request){
         $user->user_phone?? null,
         $user->adress?? null
     );
+
+    /**
+     * Envoi des events à Redis - Node.Js
+     */
+    event(new \App\Events\UserRealtimeNotification(
+        $memberAccount->user_id,
+        'Nouveau dépôt',
+        'Vous avez reçu un dépôt de '.$amount.' '.wekamemberaccounts::getMoneyAbreviationByAccountNumber($memberAccount->account_number),
+        'success'
+    )); 
+        
+    event(new \App\Events\MemberAccountUpdated(
+        $memberAccount->user_id,
+        $memberAccount
+    )); 
+        
+    event(new \App\Events\TransactionSent(
+        $memberAccount->user_id,
+        $this->show($memberTransaction)
+    ));
    return $this->successResponse('success',$this->show($makeHistory));
 }
 

@@ -1,14 +1,13 @@
 <?php
-// app/Events/UserRealtimeNotification.php
 
 namespace App\Events;
 
 use Illuminate\Broadcasting\Channel;
-use Illuminate\Contracts\Broadcasting\ShouldBroadcastNow;
-use Illuminate\Foundation\Events\Dispatchable;
 use Illuminate\Queue\SerializesModels;
+use Illuminate\Foundation\Events\Dispatchable;
+use Illuminate\Contracts\Broadcasting\ShouldBroadcastNow;
 
-class MemberAccountUpdated implements ShouldBroadcastNow
+class TransactionUpdateEvent implements ShouldBroadcastNow
 {
     use Dispatchable, SerializesModels;
 
@@ -23,19 +22,19 @@ class MemberAccountUpdated implements ShouldBroadcastNow
 
     public function broadcastOn()
     {
-        return new Channel('user-accounts');
+        return new Channel('user-transactions');
     }
 
     public function broadcastAs()
     {
-        return 'user.account';
+        return 'user.update-transaction';
     }
 
     public function broadcastWith()
     {
         return [
             'userId'  => $this->userId,
-            'account'   => $this->data
+            'transaction' => $this->data
         ];
     }
 }

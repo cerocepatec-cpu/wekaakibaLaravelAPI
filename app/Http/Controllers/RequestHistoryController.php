@@ -2,23 +2,24 @@
 
 namespace App\Http\Controllers;
 
-use App\Http\Requests\StoreproviderspaymentsRequest;
+use Exception;
 use App\Models\funds;
-use App\Models\requestHistory;
-use Illuminate\Support\Facades\DB;
-use App\Http\Requests\StorerequestHistoryRequest;
-use App\Http\Requests\UpdaterequestHistoryRequest;
-use App\Models\Expenditures;
 use App\Models\images;
 use App\Models\libraries;
-use App\Models\ProviderController;
+use App\Models\Expenditures;
+use Illuminate\Http\Request;
+use App\Models\requestHistory;
 use App\Models\providerspayments;
+use App\Models\ProviderController;
 use App\Models\ServicesController;
+use App\Models\wekamemberaccounts;
+use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Auth;
 use App\Models\StockHistoryController;
 use App\Models\wekaAccountsTransactions;
-use App\Models\wekamemberaccounts;
-use Exception;
-use Illuminate\Http\Request;
+use App\Http\Requests\StorerequestHistoryRequest;
+use App\Http\Requests\UpdaterequestHistoryRequest;
+use App\Http\Requests\StoreproviderspaymentsRequest;
 
 class RequestHistoryController extends Controller
 {
@@ -284,6 +285,7 @@ class RequestHistoryController extends Controller
 
    private function handleApprovment($request)
     {
+        $user=Auth::user();
         $fund = funds::find($request->fund_id);
         $account = wekamemberaccounts::find($request->member_account_id);
 
@@ -315,15 +317,16 @@ class RequestHistoryController extends Controller
         // Mise à jour du compte membre
         $sold_before = $account->sold;
         $account->update(['sold' => $sold_before + $request->amount]);
+        $account->refresh();
 
         // Enregistrement dans WekaAccountsTransactions
-        wekaAccountsTransactions::create([
+        $accountTransaction=wekaAccountsTransactions::create([
             'amount'            => $request->amount,
             'sold_before'       => $sold_before,
             'sold_after'        => $sold_before + $request->amount,
-            'type'              => 'deposit',
-            'motif'             => "Approvisionnement depuis la caisse {$fund->name}",
-            'user_id'           => $request->user_id,
+            'type'              => 'entry',
+            'motif'             =>$request->motif??"Approvisionnement depuis la caisse {$fund->description}",
+            'user_id'           => $user->id,
             'member_account_id' => $account->id,
             'enterprise_id'     => $request->enterprise_id,
             'done_at'           => $request->done_at,
@@ -331,6 +334,24 @@ class RequestHistoryController extends Controller
             'transaction_status'=> 'validated',
             'member_id'=>$account->user_id
         ]);
+
+        event(new \App\Events\UserRealtimeNotification(
+            $account->user_id,
+            'Nouveau dépôt',
+            'Vous avez reçu un dépôt de '.$request->amount.' '.wekamemberaccounts::getMoneyAbreviationByAccountNumber($account->account_number),
+            'success'
+        ));
+         
+        $transactionCtrl = new WekaAccountsTransactionsController();
+        event(new \App\Events\TransactionSent(
+            $account->user_id,
+            $transactionCtrl->show($accountTransaction)
+        ));
+
+        event(new \App\Events\MemberAccountUpdated(
+            $account->user_id,
+            $account
+        )); 
 
         return $withdraw;
     }
