@@ -1379,8 +1379,8 @@ class WekaAccountsTransactionsController extends Controller
 
             // 4️⃣ Réponse
             return response()->json([
-                'status'  => 'success',
-                'message' => 'Frais calculés avec succès.',
+                'status'  => 200,
+                'message' => 'success',
                 'data'    => [
                     'amount' => $amount,
                     'fees'   => $fees,
@@ -1396,8 +1396,8 @@ class WekaAccountsTransactionsController extends Controller
             ]);
 
             return response()->json([
-                'status'  => 'error',
-                'message' => 'Impossible de calculer les frais.',
+                'status'  => 500,
+                'message' => 'eror',
                 'error'   => $e->getMessage()
             ], 500);
         }
