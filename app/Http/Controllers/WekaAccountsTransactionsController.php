@@ -29,6 +29,7 @@ use Maatwebsite\Excel\Facades\Excel;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Event;
 use App\Models\wekaAccountsTransactions;
+use App\Helpers\DestinationAccountResolver;
 use Illuminate\Pagination\LengthAwarePaginator;
 use App\Http\Requests\StorerequestHistoryRequest;
 use App\Http\Requests\StorewekaAccountsTransactionsRequest;
@@ -247,158 +248,220 @@ class WekaAccountsTransactionsController extends Controller
     }
 
     public function getUserStats(Request $request)
-{
-    $user = Auth::user();
+    {
+        $user = Auth::user();
 
-    $request->validate([
-        'period' => 'nullable|string|in:7_days,this_week,this_month,this_year',
-    ]);
+        $request->validate([
+            'period' => 'nullable|string|in:7_days,this_week,this_month,this_year',
+        ]);
 
-    $period = $request->period ?? '7_days';
+        $period = $request->period ?? '7_days';
 
-    // Base query
-    $query = wekaAccountsTransactions::query()
-        ->where('member_id', $user->id)
-        ->with(['memberAccount.money']);
+        // Base query
+        $query = wekaAccountsTransactions::query()
+            ->where('member_id', $user->id)
+            ->with(['memberAccount.money']);
 
-    $stats = [];
+        $stats = [];
 
-    switch ($period) {
+        switch ($period) {
 
-        case '7_days':
-            $start = Carbon::now()->subDays(6)->startOfDay();
-            $end = Carbon::now()->endOfDay();
+            case '7_days':
+                $start = Carbon::now()->subDays(6)->startOfDay();
+                $end = Carbon::now()->endOfDay();
 
-            // Initialiser les 7 jours
-            $dates = [];
-            for ($i = 0; $i < 7; $i++) {
-                $day = Carbon::now()->subDays($i)->format('Y-m-d');
-                $dates[$day] = [
-                    'deposits' => [],
-                    'withdrawals' => [],
-                    'balance_net' => []
-                ];
-            }
-
-            $transactions = $query->whereBetween('done_at', [$start, $end])->get();
-
-            foreach ($transactions as $t) {
-                $day = Carbon::parse($t->done_at)->format('Y-m-d');
-                $money = $t->memberAccount->money->abreviation ?? 'USD';
-
-                if ($t->type === 'deposit') {
-                    $dates[$day]['deposits'][$money] = ($dates[$day]['deposits'][$money] ?? 0) + $t->amount;
-                } elseif ($t->type === 'withdraw') {
-                    $dates[$day]['withdrawals'][$money] = ($dates[$day]['withdrawals'][$money] ?? 0) + $t->amount;
+                // Initialiser les 7 jours
+                $dates = [];
+                for ($i = 0; $i < 7; $i++) {
+                    $day = Carbon::now()->subDays($i)->format('Y-m-d');
+                    $dates[$day] = [
+                        'deposits' => [],
+                        'withdrawals' => [],
+                        'balance_net' => []
+                    ];
                 }
 
-                $dates[$day]['balance_net'][$money] =
-                    ($dates[$day]['deposits'][$money] ?? 0)
-                    - ($dates[$day]['withdrawals'][$money] ?? 0);
-            }
+                $transactions = $query->whereBetween('done_at', [$start, $end])->get();
 
-            $stats = $dates;
-            break;
+                foreach ($transactions as $t) {
+                    $day = Carbon::parse($t->done_at)->format('Y-m-d');
+                    $money = $t->memberAccount->money->abreviation ?? 'USD';
 
-        case 'this_week':
+                    if ($t->type === 'deposit') {
+                        $dates[$day]['deposits'][$money] = ($dates[$day]['deposits'][$money] ?? 0) + $t->amount;
+                    } elseif ($t->type === 'withdraw') {
+                        $dates[$day]['withdrawals'][$money] = ($dates[$day]['withdrawals'][$money] ?? 0) + $t->amount;
+                    }
 
-            // Début semaine (Lundi) — Fin semaine (Dimanche)
-            $start = Carbon::now()->startOfWeek(Carbon::MONDAY);
-            $end = Carbon::now()->endOfWeek(Carbon::SUNDAY);
-
-            $days = [];
-            for ($i = 0; $i < 7; $i++) {
-                $day = $start->copy()->addDays($i)->format('Y-m-d');
-                $days[$day] = [
-                    'deposits' => [],
-                    'withdrawals' => [],
-                    'balance_net' => []
-                ];
-            }
-
-            $transactions = $query->whereBetween('done_at', [$start, $end])->get();
-
-            foreach ($transactions as $t) {
-                $day = Carbon::parse($t->done_at)->format('Y-m-d');
-                $money = $t->memberAccount->money->abreviation ?? 'USD';
-
-                if ($t->type === 'deposit') {
-                    $days[$day]['deposits'][$money] = ($days[$day]['deposits'][$money] ?? 0) + $t->amount;
-                } elseif ($t->type === 'withdraw') {
-                    $days[$day]['withdrawals'][$money] = ($days[$day]['withdrawals'][$money] ?? 0) + $t->amount;
+                    $dates[$day]['balance_net'][$money] =
+                        ($dates[$day]['deposits'][$money] ?? 0)
+                        - ($dates[$day]['withdrawals'][$money] ?? 0);
                 }
 
-                $days[$day]['balance_net'][$money] =
-                    ($days[$day]['deposits'][$money] ?? 0)
-                    - ($days[$day]['withdrawals'][$money] ?? 0);
-            }
+                $stats = $dates;
+                break;
 
-            $stats = $days;
-            break;
+            case 'this_week':
 
-        case 'this_month':
-            $start = Carbon::now()->startOfMonth();
-            $end = Carbon::now()->endOfMonth();
+                // Début semaine (Lundi) — Fin semaine (Dimanche)
+                $start = Carbon::now()->startOfWeek(Carbon::MONDAY);
+                $end = Carbon::now()->endOfWeek(Carbon::SUNDAY);
 
-            $weeks = [];
-            $transactions = $query->whereBetween('done_at', [$start, $end])->get();
+                $days = [];
+                for ($i = 0; $i < 7; $i++) {
+                    $day = $start->copy()->addDays($i)->format('Y-m-d');
+                    $days[$day] = [
+                        'deposits' => [],
+                        'withdrawals' => [],
+                        'balance_net' => []
+                    ];
+                }
 
-            foreach ($transactions as $t) {
-                $week = Carbon::parse($t->done_at)->weekOfMonth;
-                $money = $t->memberAccount->money->abreviation ?? 'USD';
+                $transactions = $query->whereBetween('done_at', [$start, $end])->get();
 
-                $weeks[$week]['deposits'][$money] = ($weeks[$week]['deposits'][$money] ?? 0);
-                $weeks[$week]['withdrawals'][$money] = ($weeks[$week]['withdrawals'][$money] ?? 0);
+                foreach ($transactions as $t) {
+                    $day = Carbon::parse($t->done_at)->format('Y-m-d');
+                    $money = $t->memberAccount->money->abreviation ?? 'USD';
 
-                if ($t->type === 'deposit') $weeks[$week]['deposits'][$money] += $t->amount;
-                elseif ($t->type === 'withdraw') $weeks[$week]['withdrawals'][$money] += $t->amount;
+                    if ($t->type === 'deposit') {
+                        $days[$day]['deposits'][$money] = ($days[$day]['deposits'][$money] ?? 0) + $t->amount;
+                    } elseif ($t->type === 'withdraw') {
+                        $days[$day]['withdrawals'][$money] = ($days[$day]['withdrawals'][$money] ?? 0) + $t->amount;
+                    }
 
-                $weeks[$week]['balance_net'][$money] =
-                    ($weeks[$week]['deposits'][$money] ?? 0)
-                    - ($weeks[$week]['withdrawals'][$money] ?? 0);
-            }
+                    $days[$day]['balance_net'][$money] =
+                        ($days[$day]['deposits'][$money] ?? 0)
+                        - ($days[$day]['withdrawals'][$money] ?? 0);
+                }
 
-            $stats = $weeks;
-            break;
+                $stats = $days;
+                break;
 
-        case 'this_year':
-            $start = Carbon::now()->startOfYear();
-            $end = Carbon::now()->endOfYear();
+            case 'this_month':
+                $start = Carbon::now()->startOfMonth();
+                $end = Carbon::now()->endOfMonth();
 
-            $months = [];
-            $transactions = $query->whereBetween('done_at', [$start, $end])->get();
+                $weeks = [];
+                $transactions = $query->whereBetween('done_at', [$start, $end])->get();
 
-            foreach ($transactions as $t) {
-                $month = Carbon::parse($t->done_at)->format('F');
-                $money = $t->memberAccount->money->abreviation ?? 'USD';
+                foreach ($transactions as $t) {
+                    $week = Carbon::parse($t->done_at)->weekOfMonth;
+                    $money = $t->memberAccount->money->abreviation ?? 'USD';
 
-                $months[$month]['deposits'][$money] = ($months[$month]['deposits'][$money] ?? 0);
-                $months[$month]['withdrawals'][$money] = ($months[$month]['withdrawals'][$money] ?? 0);
+                    $weeks[$week]['deposits'][$money] = ($weeks[$week]['deposits'][$money] ?? 0);
+                    $weeks[$week]['withdrawals'][$money] = ($weeks[$week]['withdrawals'][$money] ?? 0);
 
-                if ($t->type === 'deposit') $months[$month]['deposits'][$money] += $t->amount;
-                elseif ($t->type === 'withdraw') $months[$month]['withdrawals'][$money] += $t->amount;
+                    if ($t->type === 'deposit') $weeks[$week]['deposits'][$money] += $t->amount;
+                    elseif ($t->type === 'withdraw') $weeks[$week]['withdrawals'][$money] += $t->amount;
 
-                $months[$month]['balance_net'][$money] =
-                    ($months[$month]['deposits'][$money] ?? 0)
-                    - ($months[$month]['withdrawals'][$money] ?? 0);
-            }
+                    $weeks[$week]['balance_net'][$money] =
+                        ($weeks[$week]['deposits'][$money] ?? 0)
+                        - ($weeks[$week]['withdrawals'][$money] ?? 0);
+                }
 
-            $stats = $months;
-            break;
+                $stats = $weeks;
+                break;
 
-        default:
-            return response()->json([
-                'status' => 400,
-                'message' => 'Invalid period'
-            ]);
+            case 'this_year':
+                $start = Carbon::now()->startOfYear();
+                $end = Carbon::now()->endOfYear();
+
+                $months = [];
+                $transactions = $query->whereBetween('done_at', [$start, $end])->get();
+
+                foreach ($transactions as $t) {
+                    $month = Carbon::parse($t->done_at)->format('F');
+                    $money = $t->memberAccount->money->abreviation ?? 'USD';
+
+                    $months[$month]['deposits'][$money] = ($months[$month]['deposits'][$money] ?? 0);
+                    $months[$month]['withdrawals'][$money] = ($months[$month]['withdrawals'][$money] ?? 0);
+
+                    if ($t->type === 'deposit') $months[$month]['deposits'][$money] += $t->amount;
+                    elseif ($t->type === 'withdraw') $months[$month]['withdrawals'][$money] += $t->amount;
+
+                    $months[$month]['balance_net'][$money] =
+                        ($months[$month]['deposits'][$money] ?? 0)
+                        - ($months[$month]['withdrawals'][$money] ?? 0);
+                }
+
+                $stats = $months;
+                break;
+
+            default:
+                return response()->json([
+                    'status' => 400,
+                    'message' => 'Invalid period'
+                ]);
+        }
+
+        return response()->json([
+            'status' => 200,
+            'message' => 'success',
+            'data' => $stats
+        ]);
     }
 
-    return response()->json([
-        'status' => 200,
-        'message' => 'success',
-        'data' => $stats
-    ]);
-}
+    public function getWeeklyCurrencyStats(Request $request)
+    {
+        $user = Auth::user();
+        if (!$user) return $this->errorResponse("Non authentifié", 401);
+
+        $tz = $request->timezone ?? 'Africa/Lubumbashi';
+
+        $now   = now($tz)->endOfDay();
+        $start = $now->copy()->subDays(6)->startOfDay();
+
+        // 🔹 Transactions semaine (toutes monnaies)
+        $transactions = wekaAccountsTransactions::query()
+            ->where('member_id', $user->id)
+            ->whereBetween('done_at', [$start, $now])
+            ->with('memberAccount.money:id,abreviation')
+            ->get();
+
+        // 🔹 Initialiser les 7 jours (DATES RÉELLES UNIQUEMENT)
+        $daysTemplate = collect(range(0, 6))->mapWithKeys(function ($i) use ($now) {
+            $date = $now->copy()->subDays(6 - $i)->format('Y-m-d');
+            return [$date => 0];
+        });
+
+        // 🔹 Labels RAW (PAS DE "TODAY" ICI)
+        $labelsRaw = $daysTemplate->keys()->values();
+
+        // 🔹 Grouper par monnaie
+        $datasets = [];
+        $globalTotal = 0;
+
+        foreach ($transactions as $t) {
+            $money = $t->memberAccount->money;
+            if (!$money) continue;
+
+            $code = $money->abreviation;
+            $day  = Carbon::parse($t->done_at)->format('Y-m-d');
+
+            if (!isset($datasets[$code])) {
+                $datasets[$code] = [
+                    'money_id'   => $money->id,
+                    'values'     => $daysTemplate->toArray(),
+                    'total_week' => 0
+                ];
+            }
+            $datasets[$code]['values'][$day] += $t->amount;
+            $datasets[$code]['total_week']   += $t->amount;
+        }
+
+        // 🔹 Convertir values en array simple (ordre conservé)
+        foreach ($datasets as &$data) {
+            $data['values'] = array_values($data['values']);
+        }
+        $globalTotal=$transactions->count(); 
+        return response()->json([
+            'status'       => 200,
+            'message'      => 'success',
+            'labels_raw'   => $labelsRaw,   // 🔥 IMPORTANT
+            'datasets'     => $datasets,
+            'global_total' => $globalTotal
+        ]);
+    }
 
     public function getUserTransactions(Request $request)
     {
@@ -1871,10 +1934,11 @@ private function cashToVirtual(Request $request){
             'Vous avez reçu un dépôt de '.$amount.' '.wekamemberaccounts::getMoneyAbreviationByAccountNumber($memberAccount->account_number),
             'success'
         )); 
-        
+
+        $memberAccountCtrl = new WekamemberaccountsController();
         event(new \App\Events\MemberAccountUpdated(
             $memberAccount->user_id,
-            $memberAccount
+            $memberAccountCtrl->show($memberAccount)
         )); 
         
         event(new \App\Events\TransactionSent(
@@ -1988,10 +2052,11 @@ private function tubToAccount(Request $request){
         'Vous avez reçu un dépôt de '.$amount.' '.wekamemberaccounts::getMoneyAbreviationByAccountNumber($memberAccount->account_number),
         'success'
     )); 
-        
+    
+    $memberAccountCtrl = new WekamemberaccountsController();
     event(new \App\Events\MemberAccountUpdated(
         $memberAccount->user_id,
-        $memberAccount
+        $memberAccountCtrl->show($memberAccount)
     )); 
         
     event(new \App\Events\TransactionSent(
@@ -2102,135 +2167,141 @@ private function accountToAccount(Request $request){
    return $this->successResponse('success',$this->show($sourceTransaction));
 }
 
-    public function sendMoneyAccountToAccountPreview(Request $request)
-    {
-        $user = Auth::user();
-        $accountSource = $request['member_account_id'] ?? null;
-        $accountBeneficiary = $request['beneficiary_account_id'] ?? null;
-        $amount = $request['amount'] ?? 0;
-        $motif = $request['motif'] ?? '';
-        $otpChannel = strtolower($request['otp_channel'] ?? '');
+public function sendMoneyAccountToAccountPreview(Request $request)
+{
+    $user = Auth::user();
+    $accountSource = $request['member_account_id'] ?? null;
+    $accountBeneficiary = $request['beneficiary_account_id'] ?? null;
+    $amount = $request['amount'] ?? 0;
+    $motif = $request['motif'] ?? '';
+    $otpChannel = strtolower($request['otp_channel'] ?? '');
 
-        if (!in_array($otpChannel, ['sms', 'mail'])) {
-            return $this->errorResponse("Veuillez préciser un canal OTP valide : sms ou mail.");
-        }
-
-        // ---- VALIDATIONS ----
-        if (!$accountSource || $accountSource <= 0)
-            return $this->errorResponse("Vous devez sélectionner un compte source.");
-
-        if (!$accountBeneficiary || $accountBeneficiary <= 0)
-            return $this->errorResponse("Vous devez sélectionner un compte bénéficiaire.");
-
-        if ($amount <= 0)
-            return $this->errorResponse("Le montant doit être supérieur à 0.");
-
-        if (strlen($motif) <= 2)
-            return $this->errorResponse("Veuillez fournir un motif valide.");
-
-        $source = wekamemberaccounts::find($accountSource);
-        if (!$source)
-            return $this->errorResponse("Compte source non trouvé.");
-
-        if (!$source->isavailable())
-            return $this->errorResponse("Action sur le compte source non autorisée.");
-
-        if ($source->user_id !== $user->id)
-            return $this->errorResponse("Ce compte ne vous appartient pas.");
-
-        $beneficiary = wekamemberaccounts::findBy("account_number", $accountBeneficiary);
-        if (!$beneficiary)
-            return $this->errorResponse("Compte bénéficiaire non trouvé.");
-
-        if (!$beneficiary->isavailable())
-            return $this->errorResponse("Action sur le compte bénéficiaire non autorisée.");
-
-        if ($beneficiary->money_id !== $source->money_id)
-            return $this->errorResponse("Les comptes n'utilisent pas la même monnaie.");
-
-        if ($source->sold < $amount)
-            return $this->errorResponse("Solde insuffisant.");
-
-        // -----------------------
-        // 🔐 GÉNÉRATION OTP
-        // -----------------------
-        $otp = rand(100000, 999999);
-
-        // Token transactionnel
-        $transactionToken = base64_encode(json_encode([
-            "source" => $source->id,
-            "beneficiary" => $beneficiary->account_number,
-            "amount" => $amount,
-            "motif" => $motif,
-            "user" => $user->id,
-            "time" => time()
-        ]));
-
-        // Sauvegarde 5 min
-       Cache::put("otp_transfer_{$user->id}", [
-            "otp" => $otp,
-            "transaction_token" => $transactionToken,
-            "otp_channel" => $otpChannel,   // 🔥 ON STOCKE LE CANAL
-        ], now()->addMinutes(5));
-
-        // -----------------------
-        // 📬 ENVOI OTP
-        // -----------------------
-        if ($otpChannel === 'sms') {
-
-            try {
-                $twilio = new Client(env('TWILIO_SID'), env('TWILIO_TOKEN'));
-                $twilio->messages->create(
-                    $user->user_phone,
-                    [
-                        "from" => env("TWILIO_FROM"),
-                        "body" => "Votre OTP de confirmation est : $otp"
-                    ]
-                );
-            } catch (\Exception $e) {
-                return $this->errorResponse("Erreur lors de l'envoi du SMS : " . $e->getMessage());
-            }
-
-        } else {
-
-            try {
-                Mail::raw(
-                    "Votre OTP pour confirmer la transaction est : $otp",
-                    function ($message) use ($user) {
-                        $message->to($user->email)
-                            ->subject("OTP de confirmation");
-                    }
-                );
-            } catch (\Exception $e) {
-                return $this->errorResponse("Erreur lors de l'envoi de l'email : " . $e->getMessage());
-            }
-        }
-        $fees =TransactionFee::calculateFee($amount, $source->money_id, 'send');
-        $totalAmount = $amount + $fees['fee'];
-        // -----------------------
-        // 📄 RÉSUMÉ
-        // -----------------------
-        $preview = [
-            "otp_channel" => $otpChannel,
-            "transaction_token" => $transactionToken,
-            "amount" => $amount,
-            "fees" => $fees['fee'],
-            "total_to_debit" => $totalAmount,
-            "motif" => $motif,
-            "source_account" => [
-                "number" => $source->account_number,
-                "sold_before" => $source->sold,
-                "sold_after" => $source->sold - $amount,
-            ],
-            "beneficiary_account" => [
-                "number" => $beneficiary->account_number,
-                "sold_before" => $beneficiary->sold,
-                "sold_after" => $beneficiary->sold + $amount,
-            ],
-        ];
-
-        return $this->successResponse("success", $preview);
+    if (!in_array($otpChannel, ['sms', 'mail'])) {
+        return $this->errorResponse("Veuillez préciser un canal OTP valide : sms ou mail.");
     }
+
+    // ---- VALIDATIONS ----
+    if (!$accountSource || $accountSource <= 0)
+        return $this->errorResponse("Vous devez sélectionner un compte source.");
+
+    if (!$accountBeneficiary || $accountBeneficiary <= 0)
+        return $this->errorResponse("Vous devez sélectionner un compte bénéficiaire.");
+
+    if ($amount <= 0)
+        return $this->errorResponse("Le montant doit être supérieur à 0.");
+
+    if (strlen($motif) <= 2)
+        return $this->errorResponse("Veuillez fournir un motif valide.");
+
+    $source = wekamemberaccounts::find($accountSource);
+    if (!$source)
+        return $this->errorResponse("Compte source non trouvé.");
+
+    if (!$source->isavailable())
+        return $this->errorResponse("Action sur le compte source non autorisée.");
+
+    if ($source->user_id !== $user->id)
+        return $this->errorResponse("Ce compte ne vous appartient pas.");
+
+    $beneficiary =DestinationAccountResolver::resolve(
+        $accountBeneficiary,
+        $source->money_id
+    );
+    
+    if (!$beneficiary)
+        return $this->errorResponse("Compte bénéficiaire non trouvé.");
+
+    if (!$beneficiary->isavailable())
+        return $this->errorResponse("Action sur le compte bénéficiaire non autorisée.");
+
+    if ($beneficiary->money_id !== $source->money_id)
+        return $this->errorResponse("Les comptes n'utilisent pas la même monnaie.");
+
+    if ($source->sold < $amount)
+        return $this->errorResponse("Solde insuffisant.");
+
+    // -----------------------
+    // 🔐 GÉNÉRATION OTP
+    // -----------------------
+    $otp = rand(100000, 999999);
+
+    // Token transactionnel
+    $transactionToken = base64_encode(json_encode([
+        "source" => $source->id,
+        "beneficiary" => $beneficiary->account_number,
+        "amount" => $amount,
+        "motif" => $motif,
+        "user" => $user->id,
+        "time" => time()
+    ]));
+
+    // Sauvegarde 5 min
+    Cache::put("otp_transfer_{$user->id}", [
+        "otp" => $otp,
+        "transaction_token" => $transactionToken,
+        "otp_channel" => $otpChannel,   // 🔥 ON STOCKE LE CANAL
+    ], now()->addMinutes(5));
+
+    // -----------------------
+    // 📬 ENVOI OTP
+    // -----------------------
+    if ($otpChannel === 'sms') {
+
+        try {
+            $twilio = new Client(env('TWILIO_SID'), env('TWILIO_TOKEN'));
+            $twilio->messages->create(
+                $user->user_phone,
+                [
+                    "from" => env("TWILIO_FROM"),
+                    "body" => "Votre OTP de confirmation est : $otp"
+                ]
+            );
+        } catch (\Exception $e) {
+            return $this->errorResponse("Erreur lors de l'envoi du SMS : " . $e->getMessage());
+        }
+
+    } else {
+
+        try {
+            Mail::raw(
+                "Votre OTP pour confirmer la transaction est : $otp",
+                function ($message) use ($user) {
+                    $message->to($user->email)
+                        ->subject("OTP de confirmation");
+                }
+            );
+        } catch (\Exception $e) {
+            return $this->errorResponse("Erreur lors de l'envoi de l'email : " . $e->getMessage());
+        }
+    }
+    $fees =TransactionFee::calculateFee($amount, $source->money_id, 'send');
+    $totalAmount = $amount + $fees['fee'];
+    // -----------------------
+    // 📄 RÉSUMÉ
+    // -----------------------
+    $preview = [
+        "otp_channel" => $otpChannel,
+        "transaction_token" => $transactionToken,
+        "amount" => $amount,
+        "fees" => $fees['fee'],
+        "total_to_debit" => $totalAmount,
+        "motif" => $motif,
+        "source_account" => [
+            "number" => $source->account_number,
+            "sold_before" => $source->sold,
+            "sold_after" => $source->sold - $amount,
+            "description"=>$source->description,
+        ],
+        "beneficiary_account" => [
+            "number" => $beneficiary->account_number,
+            "sold_before" => $beneficiary->sold,
+            "sold_after" => $beneficiary->sold + $amount,
+            "description"=>$beneficiary->description,
+        ],
+    ];
+
+    return $this->successResponse("success", $preview);
+}
 
    public function sendMoneyAccountToAccount(Request $request)
 {
@@ -2276,8 +2347,16 @@ private function accountToAccount(Request $request){
 
         if ($sourceMemberAccount->user_id !== $user->id) { DB::rollBack(); return $this->errorResponse("Le compte n'est pas à vous."); }
 
-        $beneficiaryMemberAccount = wekamemberaccounts::findBy("account_number", $accountBeneficiary);
-        if (!$beneficiaryMemberAccount) { DB::rollBack(); return $this->errorResponse("Aucun compte bénéficiaire trouvé."); }
+        $beneficiaryMemberAccount =DestinationAccountResolver::resolve(
+            $accountBeneficiary,
+            $sourceMemberAccount->money_id
+        );
+
+        if (!$beneficiaryMemberAccount) {
+            DB::rollBack();
+            return $this->errorResponse("Aucun compte bénéficiaire trouvé.");
+        }
+
 
         if (!$beneficiaryMemberAccount->isavailable()) { DB::rollBack(); return $this->errorResponse("Action sur le compte bénéficiaire non autorisée."); }
 
@@ -2286,11 +2365,40 @@ private function accountToAccount(Request $request){
             return $this->errorResponse("Les deux comptes n'utilisent pas la même monnaie."); 
         }
 
+        if ($beneficiaryMemberAccount->user_id === $sourceMemberAccount->user_id) {
+            DB::rollBack();
+            return $this->errorResponse(
+                "Vous ne pouvez pas transférer de l'argent vers votre propre compte."
+            );
+        }
+
+        $initiatorIsCollector   = (bool) $user->collector;
+        $beneficiaryUser        = User::find($beneficiaryMemberAccount->user_id);
+        $beneficiaryIsCollector = $beneficiaryUser && $beneficiaryUser->collector;
+
         // ----------------------------
         // FEES
         // ----------------------------
-        $fees = TransactionFee::calculateFee($amount, $sourceMemberAccount->money_id, 'send');
-        $totalAmount = $amount + $fees['fee'];
+         $fees = ['fee' => 0];
+        $totalAmount = $amount;
+
+        // 🔴 CAS 2 : non-collecteur → collecteur = INTERDIT
+        if (!$initiatorIsCollector && $beneficiaryIsCollector) {
+            DB::rollBack();
+            return $this->errorResponse(
+                "Transfert vers un collecteur non autorisé."
+            );
+        }
+
+        // 🟢 CAS 3 : non-collecteur → non-collecteur = FRAIS
+        if (!$initiatorIsCollector && !$beneficiaryIsCollector) {
+            $fees = TransactionFee::calculateFee(
+                $amount,
+                $sourceMemberAccount->money_id,
+                'send'
+            );
+            $totalAmount = $amount + $fees['fee'];
+        }
 
         if ($sourceMemberAccount->sold < $totalAmount) {
             DB::rollBack();
@@ -2300,19 +2408,23 @@ private function accountToAccount(Request $request){
         // ----------------------------
         // AUTOMATIC FUND
         // ----------------------------
+       if ($fees['fee'] > 0) {
         $automatiFund = funds::getAutomaticFund($sourceMemberAccount->money_id);
-        if (!$automatiFund) { DB::rollBack(); return $this->errorResponse("Aucune caisse configurée pour les commissions!"); }
+        if (!$automatiFund) {
+            DB::rollBack();
+            return $this->errorResponse(
+                "Aucune caisse configurée pour les commissions."
+            );
+        }
 
-        // 👉 D'abord ajouter TOUTES les commissions à la caisse
         $automatiFund->sold += $fees['fee'];
         $automatiFund->save();
 
-        // Historique incluant 100% des frais
         $this->createLocalRequestHistory(
             $user->id,
             $automatiFund->id,
             $fees['fee'],
-            "Frais de retrait. ".$motif,
+            "Frais de transfert. " . $motif,
             'entry',
             null,
             null,
@@ -2326,7 +2438,7 @@ private function accountToAccount(Request $request){
             $sourceMemberAccount->id,
             'approvment'
         );
-
+    }
 
         // ----------------------------
         // DEBIT SOURCE
@@ -2452,9 +2564,15 @@ private function accountToAccount(Request $request){
                 'success'
         )); 
         
+        $memberAccountCtrl = new WekamemberaccountsController();
         event(new \App\Events\MemberAccountUpdated(
             $beneficiaryUser->id,
-            $beneficiaryMemberAccount
+            $memberAccountCtrl->show($beneficiaryMemberAccount)
+        ));  
+        
+        event(new \App\Events\MemberAccountUpdated(
+            $user->id,
+            $memberAccountCtrl->show($sourceMemberAccount)
         )); 
         
         event(new \App\Events\TransactionSent(

@@ -38,6 +38,8 @@ class User extends Authenticatable implements CanResetPassword
         'can_withdraw_on_mobile',
         'can_withdraw_by_agent',
         'adress',
+        'two_factor_enabled',
+        'two_factor_channel'
     ];
 
     /**
@@ -49,6 +51,8 @@ class User extends Authenticatable implements CanResetPassword
         'email_verified_at',
         'laravel_through_key',
         'pin',
+        'two_factor_enabled',
+        'two_factor_channel'
     ];
 
     /**
@@ -93,12 +97,18 @@ class User extends Authenticatable implements CanResetPassword
         return $this->hasMany(UsersEnterprise::class, 'user_id', 'id');
     }
 
-    public function mobileMoneyProviders()
+   public function mobileMoneyProviders()
     {
-        return $this->belongsToMany(MobileMoneyProviders::class, 'users_mobile_money_providers')
-            ->withPivot('phone_number', 'status')
-            ->withTimestamps();
+        return $this->belongsToMany(
+            MobileMoneyProviders::class,
+            'users_mobile_money_providers',
+            'user_id',
+            'mobile_money_provider_id'
+        )
+        ->withPivot('phone_number', 'status')
+        ->withTimestamps();
     }
+
 
     public function getMobileMoneyProviderConfigDetails(string $telecom)
     {

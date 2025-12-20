@@ -2,21 +2,25 @@
 
 namespace App\Http\Controllers;
 
-use Illuminate\Http\Request;
-use Illuminate\Support\Facades\Hash;
-use App\Models\User;
-use App\Models\RefreshToken;
-use Illuminate\Support\Str;
-use Illuminate\Support\Facades\DB;
-use Illuminate\Support\Facades\Validator;
-use Illuminate\Support\Facades\Auth;
-use Illuminate\Support\Facades\Mail;
 use Carbon\Carbon;
-use Illuminate\Support\Facades\Password;
-use Illuminate\Support\Facades\Log;
-use App\Mail\PasswordResetSuccessMail;
+use App\Models\User;
+use Illuminate\Support\Str;
+use Jenssegers\Agent\Agent;
+use App\Models\RefreshToken;
+use Illuminate\Http\Request;
 use App\Models\PasswordReset;
+use App\Models\TwoFactorRequest;
+use App\Services\TwoFactorService;
+use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Log;
+use App\Jobs\SendSecurityLoginAlert;
+use Illuminate\Support\Facades\Auth;
+use Illuminate\Support\Facades\Hash;
+use Illuminate\Support\Facades\Mail;
 use Illuminate\Support\Facades\Cache;
+use App\Mail\PasswordResetSuccessMail;
+use Illuminate\Support\Facades\Password;
+use Illuminate\Support\Facades\Validator;
 use App\Mail\PasswordChangedSecurityAlert;
 
 
@@ -560,96 +564,117 @@ class AuthController extends Controller
     }
 
     // Login
-   public function login(Request $request)
-    {
-        DB::beginTransaction();
+    public function login(Request $request)
+{
+    DB::beginTransaction();
 
-        try {
-            // 1️⃣ Validation des champs
-            $data = $request->validate([
-                'login'    => 'required|string',
-                'password' => 'required|string',
-            ]);
+    try {
 
-            $field = filter_var($data['login'], FILTER_VALIDATE_EMAIL) ? 'email' : 'user_name';
+        $data = $request->validate([
+            'login'    => 'required|string',
+            'password' => 'required|string',
+        ]);
 
-            // 2️⃣ Récupération de l'utilisateur avec entreprise
-            $user = User::leftJoin('usersenterprises as UE', 'users.id', '=', 'UE.user_id')
-                        ->where('users.' . $field, $data['login'])
-                        ->where('users.status', 'enabled')
-                        ->select('users.*', 'UE.enterprise_id')
-                        ->first();
+        // $field = filter_var($data['login'], FILTER_VALIDATE_EMAIL)
+        //     ? 'email'
+        //     : 'user_name';
 
-            if (!$user) {
-                return $this->errorResponse('Utilisateur non trouvé ou compte désactivé.', 404);
-            }
+        // $user = User::leftJoin('usersenterprises as UE', 'users.id', '=', 'UE.user_id')
+        //     ->where('users.' . $field, $data['login'])
+        //     ->where('users.status', 'enabled')
+        //     ->select('users.*', 'UE.enterprise_id')
+        //     ->first();
+        $login = trim($data['login']);
+
+        $user = User::leftJoin('usersenterprises as UE', 'users.id', '=', 'UE.user_id')
+            ->where('users.status', 'enabled')
+            ->where(function ($q) use ($login) {
+                if (filter_var($login, FILTER_VALIDATE_EMAIL)) {
+                    $q->where('users.email', $login);
+                } else {
+                    $q->where('users.uuid', $login)
+                    ->orWhere('users.user_name', $login);
+                }
+            })
+            ->select('users.*', 'UE.enterprise_id')
+            ->first();
 
             if (!$user || !Hash::check($data['password'], $user->password)) {
                 return $this->errorResponse('Les identifiants sont invalides.', 401);
             }
 
-            // 3️⃣ Entreprise active
-            $actualEse = $this->getEse($user->id);
-            if ($actualEse) {
-                $user->enterprise_id = $actualEse['id'];
-            }
+        // 🔐 2FA
+        if ($user->two_factor_enabled) {
 
-            // 4️⃣ Supprimer anciens tokens
-            $user->tokens()->delete();
-
-            // 5️⃣ Créer un token via Sanctum
-            $tokenExpiration = now()->addMinutes(60);
-            $token = $user->createToken('api_token', ['*']);
-            $plainTextToken = $token->plainTextToken;
-
-            // 6️⃣ Mettre à jour expires_at dans la table
-            $token->accessToken->update([
-                'expires_at' => $tokenExpiration,
-            ]);
-
-            // 7️⃣ Créer un refresh token (1 jour)
-            $refreshTokenString = Str::random(64);
-            $refreshToken = RefreshToken::create([
-                'user_id'    => $user->id,
-                'token'      => hash('sha256', $refreshTokenString),
-                'expires_at' => now()->addDay(),
-                'revoked'    => false,
-            ]);
-
-            // 8️⃣ Gestion super_admin (rôles et permissions)
-            if ($user->user_type === 'super_admin') {
-                if ($user->roles()->count() === 0) {
-                    $enterpriseRoles = \Spatie\Permission\Models\Role::where('enterprise_id', $user->enterprise_id)->get();
-                    if ($enterpriseRoles->isNotEmpty()) {
-                        $user->syncRoles($enterpriseRoles);
-                    }
-                }
-
-                if ($user->permissions()->count() === 0) {
-                    $allPermissions = \Spatie\Permission\Models\Permission::all();
-                    $user->syncPermissions($allPermissions);
-                }
-            }
-
-            DB::commit();
-            $permissions=$user->getAllPermissions()->pluck('name')->toArray();
-            // 9️⃣ Retour API
-            return $this->successResponse('success', [
-                'user'            => $user,
-                'enterprise'      => $actualEse,
-                'defaultmoney'    => $this->defaultmoney($actualEse['id'] ?? null),
-                'access_token'    => $plainTextToken,       // token à utiliser pour Authorization Bearer
-                'expires_in'      => 3600,
-                'permissions'     =>$permissions,                   // 10 minutes en secondes
-                'refresh_token'   => $refreshTokenString,
-                'refresh_expires_at' => $refreshToken->expires_at,
-            ]);
-
-        } catch (\Throwable $e) {
             DB::rollBack();
-            return $this->errorResponse('error', $e->getMessage(), 500);
+
+            // 🔗 1️⃣ Générer le challenge AVANT
+            $challengeId = Str::uuid()->toString();
+
+            // 🔥 2️⃣ Stocker le challenge
+            Cache::put(
+                "login_challenge:{$challengeId}",
+                [
+                    'user_id'    => $user->id,
+                    'expires_at' => now()->addMinutes(10),
+                ],
+                now()->addMinutes(10)
+            );
+
+            // 📧 3️⃣ Initier le 2FA AVEC le challenge
+            if ($user->two_factor_channel === 'email') {
+                TwoFactorService::initiate($user, $challengeId);
+            }
+
+            // 🔁 4️⃣ Réponse frontend
+            return response()->json([
+                'message'            => '2FA_REQUIRED',
+                'channel'            => $user->two_factor_channel,
+                'login_challenge_id' => $challengeId,
+            ],403);
         }
+
+        // ⬇️⬇️⬇️ LOGIN NORMAL (2FA désactivé) ⬇️⬇️⬇️
+
+        $actualEse = $this->getEse($user->id);
+        if ($actualEse) {
+            $user->enterprise_id = $actualEse['id'];
+        }
+
+        $user->tokens()->delete();
+
+        $tokenExpiration = now()->addMinutes(60);
+        $token = $user->createToken('api_token', ['*']);
+        $plainTextToken = $token->plainTextToken;
+
+        $token->accessToken->update([
+            'expires_at' => $tokenExpiration,
+        ]);
+
+        $refreshTokenString = Str::random(64);
+        $refreshToken = RefreshToken::create([
+            'user_id'    => $user->id,
+            'token'      => hash('sha256', $refreshTokenString),
+            'expires_at' => now()->addDay(),
+            'revoked'    => false,
+        ]);
+
+        DB::commit();
+
+        return $this->successResponse('success', [
+            'user'               => $user,
+            'enterprise'         => $actualEse,
+            'access_token'       => $plainTextToken,
+            'expires_in'         => 3600,
+            'refresh_token'      => $refreshTokenString,
+            'refresh_expires_at' => $refreshToken->expires_at,
+        ]);
+
+    } catch (\Throwable $e) {
+        DB::rollBack();
+        return $this->errorResponse('error', $e->getMessage(), 500);
     }
+}
 
    public function refresh(Request $request)
     {
@@ -735,4 +760,144 @@ class AuthController extends Controller
     {
         return response()->json($request->user());
     }
+
+    /***
+     * 2FA Methods
+     */
+    public function verify($token)
+    {
+        $request = TwoFactorRequest::where('token', $token)
+            ->where('status', 'pending')
+            ->where('expires_at', '>', now())
+            ->firstOrFail();
+
+        $request->update([
+            'status'      => 'approved',
+            'approved_at'=> now()
+        ]);
+
+        event(new \App\Events\TwoFactorAuthEvent(
+            $request->user_id,
+            $request->token
+        ));
+       
+       return redirect(config('app.frontend_url') . '/assets/2fa-success.html');
+    }  
+    
+    public function reject($token)
+    {
+        $request = TwoFactorRequest::where('token', $token)
+            ->where('status', 'pending')
+            ->where('expires_at', '>', now())
+            ->firstOrFail();
+
+        $request->update([
+            'status'      => 'rejected',
+            'approved_at'=> now()
+        ]);
+
+        event(new \App\Events\TwoFactorAuthEvent(
+            $request->user_id,
+            $request->token
+        ));
+       
+        return redirect('/2fa/success');
+    }
+
+    public function trigger(Request $request)
+    {
+        $user = $request->user();
+
+        // Simule une action sensible
+        return TwoFactorService::test($user);
+    }
+
+    public function completeLogin(Request $request)
+    {
+        $challengeId = $request->input('login_challenge_id');
+
+        if (!$challengeId) {
+            return $this->errorResponse('MISSING_CHALLENGE', 400);
+        }
+
+        $challenge = Cache::get("login_challenge:{$challengeId}");
+
+        if (!$challenge) {
+            return $this->errorResponse('INVALID_OR_EXPIRED_CHALLENGE', 401);
+        }
+
+        return DB::transaction(function () use ($challengeId, $challenge) {
+
+            $userId = $challenge['user_id'];
+
+            // 🔐 Vérifier 2FA strictement lié au challenge
+            $twoFa = TwoFactorRequest::where('user_id', $userId)
+                ->where('challenge_id', $challengeId)
+                ->where('status', 'approved')
+                ->whereNull('consumed_at')
+                ->where('expires_at', '>=', now())
+                ->first();
+
+            if (!$twoFa) {
+                return $this->errorResponse('2FA_NOT_APPROVED', 200);
+            }
+
+            // 🔓 Charger l'utilisateur
+            $user = User::findOrFail($userId);
+
+            // 🏢 Entreprise active
+            $actualEse = $this->getEse($user->id);
+            if ($actualEse) {
+                $user->enterprise_id = $actualEse['id'];
+            }
+
+            // 🔐 Révoquer anciens tokens
+            $user->tokens()->delete();
+
+            // 🔑 Token Sanctum
+            $tokenExpiration = now()->addMinutes(60);
+            $token = $user->createToken('api_token', ['*']);
+            $plainTextToken = $token->plainTextToken;
+
+            $token->accessToken->update([
+                'expires_at' => $tokenExpiration,
+            ]);
+
+            // 🧾 Consommer le 2FA
+            $twoFa->update([
+                'consumed_at' => now(),
+            ]);
+
+            // 🧹 Consommer le challenge APRÈS succès
+            Cache::forget("login_challenge:{$challengeId}");
+
+            // 🔁 Refresh token
+            $refreshTokenString = Str::random(64);
+            $refreshToken = RefreshToken::create([
+                'user_id'    => $user->id,
+                'token'      => hash('sha256', $refreshTokenString),
+                'expires_at' => now()->addDay(),
+                'revoked'    => false,
+            ]);
+
+            $agent = new Agent();
+            
+            dispatch(new SendSecurityLoginAlert($user, [
+                'ip'       => request()->ip(),
+                'device'   => $agent->device(),
+                'browser'  => request()->userAgent(),
+                'location' => $twoFa->city ?? $twoFa->country ?? 'Inconnue',
+            ]));
+
+            return $this->successResponse('success', [
+                'user'               => $user,
+                'enterprise'         => $actualEse,
+                'access_token'       => $plainTextToken,
+                'expires_in'         => 3600,
+                'refresh_token'      => $refreshTokenString,
+                'refresh_expires_at' => $refreshToken->expires_at,
+            ]);
+        });
+    }
+
 }

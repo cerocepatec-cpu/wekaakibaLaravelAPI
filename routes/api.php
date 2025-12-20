@@ -36,6 +36,7 @@ use App\Http\Controllers\MaterialsController;
 use App\Http\Controllers\PositionsController;
 use App\Http\Controllers\SafeguardController;
 use App\Http\Controllers\SerdipaysController;
+use App\Http\Controllers\TwoFactorController;
 use App\Http\Controllers\VehiculesController;
 use App\Http\Controllers\AgentBonusController;
 use App\Http\Controllers\PermissionController;
@@ -122,6 +123,11 @@ Route::post('/password/verify', [AuthController::class, 'verifyResetCode']);
 Route::post('/password/reset', [AuthController::class, 'resetPassword']);
 Route::get('/serdi/paie/get-token',[SerdipaysController::class,'getToken']);
 Route::post('/cerouzisha/serditransactionsfeedback',[SerdipaysController::class,'serditransactionsfeedback']);
+Route::post('/2fa/complete-login', [AuthController::class, 'completeLogin']);
+Route::middleware('auth:sanctum')->post(
+    '/test/2fa',
+    [AuthController::class, 'trigger']
+);
 
 Route::middleware(['auth:sanctum', 'permission:agents.add'])->post('/weka/members/newmember', [UsersController::class, 'newwekamember']);
 Route::middleware(['auth:sanctum', 'permission:agents.edit'])->group(function () {
@@ -165,6 +171,8 @@ Route::middleware(['auth:sanctum'])->group(function () {
     Route::get('/roles/{roleId}/users', [RolePermissionController::class, 'getRoleUsers']);
     Route::post('/roles/remove-from-users', [RolePermissionController::class, 'removeRoleFromUsers']);
 
+    Route::post('/users/mobilemoneyproviders/new',[UsersMobileMoneyProvidersController::class,'store']);
+
     Route::post('/assign-role', [PermissionController::class, 'assignRole']);
     Route::post('/give-permission', [PermissionController::class, 'givePermissions']);
     Route::post('/check-permission', [PermissionController::class, 'checkPermission']);
@@ -194,6 +202,7 @@ Route::middleware(['auth:sanctum'])->group(function () {
     Route::get('/weka/account/transactions',[WekaAccountsTransactionsController::class,'getTransactionsByAccount']);
     Route::post('/weka/transactions/pdfexport', [WekaAccountsTransactionsController::class, 'exportTransactionsPdf']);
     Route::get('/user/transactions',[WekaAccountsTransactionsController::class, 'getUserTransactions']);
+    Route::get('/user/transactions/weekly-stats',[WekaAccountsTransactionsController::class, 'getWeeklyCurrencyStats']);
     Route::get('/user/stats', [WekaAccountsTransactionsController::class, 'getUserStats']);
     Route::post('/weka/transactions/sendmoneyto', [WekaAccountsTransactionsController::class, 'sendMoneyAccountToAccount']);
     Route::post('/weka/transactions/sendmoneytopreview', [WekaAccountsTransactionsController::class, 'sendMoneyAccountToAccountPreview']);
@@ -203,6 +212,7 @@ Route::middleware(['auth:sanctum'])->group(function () {
     Route::post('/expenditures/doneby',[ExpendituresController::class,'doneby']);
     Route::get('/weka/transactionspaginated',[WekaAccountsTransactionsController::class,'getTransactionslistByUser']);
     Route::get('/weka/mobilemoneyproviders/enterprise/{id}',[MobileMoneyProvidersController::class,'index']);
+    Route::get('/weka/settings/mobilemoneyproviders/enterprise/{id}',[MobileMoneyProvidersController::class,'indexWithUserConfig']);
     Route::post('/weka/accounts/depositbymobilemoney',[MobileMoneyProvidersController::class,'depositbymobilemoney']);
     Route::post('/weka/accounts/withdrawbymobilemoney',[MobileMoneyProvidersController::class,'withdrawbymobilemoney']);
    
@@ -216,6 +226,8 @@ Route::middleware(['auth:sanctum'])->group(function () {
     Route::post('/agent/bonus/withdraw/currency', [AgentBonusController::class, 'withdrawByCurrency']);
     Route::post('/agent/bonus/withdraw/all', [AgentBonusController::class, 'withdrawAll']);
 
+    Route::post('/weka/accounts/directdepositviaAgent',[WekatransfertsaccountsController::class,'directDepositViaAgent']);
+    Route::post('/weka/accounts/validatedirectdepositotp',[WekatransfertsaccountsController::class,'validateDirectDepositOtp']);
     Route::post('/weka/accounts/newsostransfert',[WekatransfertsaccountsController::class,'sosStore']);
     Route::prefix('weka/sos-transferts')->group(function () {
         Route::post('{id}/validate', [WekatransfertsaccountsController::class, 'validateTransfer']);
@@ -223,6 +235,7 @@ Route::middleware(['auth:sanctum'])->group(function () {
     });
     Route::get('/weka/account/transferts/history',[WekatransfertsaccountsController::class,'getTransfersList']);
     Route::get('/weka/pending/sos-transferts',[WekatransfertsaccountsController::class,'indexPending']);
+    Route::get('/weka/nbr-sos-transferts',[WekatransfertsaccountsController::class,'getNbrSosPending']);
         
     });
 
@@ -1007,8 +1020,6 @@ Route::get('/clear-laravel-cache', function () {
 // /**
 //  * SERDI PAIE INTEGRATION 
 //  */
-
-// Route::post('/users/mobilemoneyproviders/new',[UsersMobileMoneyProvidersController::class,'store']);
 
 // /**
 //  * WEKA WITHDRAWL METHODS

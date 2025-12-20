@@ -95,8 +95,19 @@ class wekamemberaccounts extends Model
             ->where('account_status', 'enabled')
             ->with('money')
             ->get()
-            ->groupBy(fn($account) => $account->money->abreviation)
-            ->map(fn($group) => $group->sum('sold'))
+            ->groupBy(function ($account) {
+                return $account->money->abreviation
+                    ?? $account->money->name
+                    ?? 'UNKNOWN';
+            })
+            ->map(function ($group, $currency) {
+                return [
+                    'description' => 'Total in ' . $currency,
+                    'currency' => $currency,
+                    'sum' => $group->sum('sold'),
+                ];
+            })
+            ->values() // 🔥 transforme en tableau indexé
             ->toArray();
     }
 
