@@ -1,7 +1,10 @@
 <?php
+use App\Models\User;
+use Illuminate\Http\Request;
 use Illuminate\Http\Response;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\File;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Route;
 use App\Http\Controllers\AuthController;
 use App\Http\Controllers\MailController;
@@ -62,10 +65,12 @@ use App\Http\Controllers\RequestHistoryController;
 use App\Http\Controllers\RolePermissionController;
 use App\Http\Controllers\SelfReferencesController;
 use App\Http\Controllers\TransfertstockController;
+use App\Http\Controllers\UserPreferenceController;
 use App\Http\Controllers\AdvancesalariesController;
 use App\Http\Controllers\MoneyConversionController;
 use App\Http\Controllers\SharedlibrariesController;
 use App\Http\Controllers\SubDepartementsController;
+use App\Http\Controllers\WithdrawRequestController;
 use App\Http\Controllers\AffectationUsersController;
 use App\Http\Controllers\PressingServicesController;
 use App\Http\Controllers\PricesCategoriesController;
@@ -111,10 +116,6 @@ use App\Http\Controllers\CategoriesServicesControllerController;
 | is assigned the "api" middleware group. Enjoy building your API!
 |
 */
-Route::get('/test-guard', function() {
-    $user = Auth::user();
-    return method_exists($user, 'can');
-});
 Route::post('register', [AuthController::class, 'register']);
 Route::post('login',    [AuthController::class, 'login']);
 Route::post('/refresh', [AuthController::class, 'refresh']);
@@ -124,20 +125,46 @@ Route::post('/password/reset', [AuthController::class, 'resetPassword']);
 Route::get('/serdi/paie/get-token',[SerdipaysController::class,'getToken']);
 Route::post('/cerouzisha/serditransactionsfeedback',[SerdipaysController::class,'serditransactionsfeedback']);
 Route::post('/2fa/complete-login', [AuthController::class, 'completeLogin']);
-Route::middleware('auth:sanctum')->post(
-    '/test/2fa',
-    [AuthController::class, 'trigger']
-);
-
-Route::middleware(['auth:sanctum', 'permission:agents.add'])->post('/weka/members/newmember', [UsersController::class, 'newwekamember']);
-Route::middleware(['auth:sanctum', 'permission:agents.edit'])->group(function () {
-    Route::put('/weka/members/update/{id}',[UsersController::class,'updatewekamember']);
+Route::get('/sessions/pending-status',[AuthController::class, 'pendingStatus']);
+Route::middleware(['auth:sanctum','permission:agents.add','session.lastseen'])->post('/weka/members/newmember', [UsersController::class, 'newwekamember']);
+Route::middleware(['auth:sanctum','permission:agents.edit','session.lastseen'])->group(function () {
+  
     Route::post('/weka/users/changeaccess/',[UsersController::class,'changeaccess']);
     Route::post('/users/updatestatus',[UsersController::class,'changerStatus']);
     Route::post('/weka/member/updatecollectionpercentage',[UsersController::class,'updatecollectionpercentage']);
 }); 
+// routes/api.php
+// Route::post('/session/heartbeat', function (Request $request) {
+//     $user = auth()->user();
+//     $user=User::find($user->id);
+//     $session = $user?->currentSessionByDevice(
+//         $request->header('X-Device-Type')
+//     );
 
-Route::middleware(['auth:sanctum'])->group(function () {
+//     if ($session) {
+//         $session->update([
+//             'last_seen_at' => now(),
+//         ]);
+//     }
+
+//     return response()->json(['ok' => true]);
+// })->middleware('auth:sanctum');
+
+
+Route::middleware(['auth:sanctum','session.lastseen'])->group(function () {
+    Route::post('/session/heartbeat', function (Request $request) {
+    $userId = auth()->id();
+    $device = $request->header('X-Device-Type', 'web');
+        Cache::put(
+            "heartbeat:{$userId}:{$device}",
+            time(),
+            90 // TTL
+        );
+        return response()->json([
+            'message'=>"success"
+        ]);
+    });
+      Route::put('/weka/members/update/{id}',[UsersController::class,'updatewekamember']);
     /** Non-sensibles ou lecture simple */
     Route::post('/logout', [AuthController::class, 'logout']);
     Route::get('/me', [AuthController::class,'me']);
@@ -148,6 +175,10 @@ Route::middleware(['auth:sanctum'])->group(function () {
     Route::get('/tubs/enterprise/{id}', [FundsController::class,'index']);
     Route::put('/resetpin',[AuthController::class,'resetPin']);
     Route::post('/verify-pin',[AuthController::class, 'verifyPin']);
+    Route::post('/sessions/approve-login', [AuthController::class, 'approveLogin']);
+    Route::post('/sessions/reject-login',  [AuthController::class, 'rejectLogin']);
+   
+
     // Route::put('/user/update-sensitive-info',[AuthController::class,'updateSensitiveInfo']);
     Route::put('/user/update-sensitive-info-password',[AuthController::class,'updateSensitiveInfoPassword']);
 
@@ -188,7 +219,14 @@ Route::middleware(['auth:sanctum'])->group(function () {
     Route::get('/weka/users/enterprise/{id}',[UsersController::class,'wekamemberslist']);
     Route::post('/funds/requesthistories',[FundsController::class,'requesthistoriesbyagent']);
     Route::get('/money/enterprise/{id}',[MoneysController::class,'index']);
+    Route::get('/money/enterprise',[MoneysController::class,'secondlistmoney']);
     Route::get('/request_history/byfund/{fund}',[RequestHistoryController::class,'getbyfund']);
+    Route::get('/settings', [UserPreferenceController::class, 'show']);
+    Route::put('/settings', [UserPreferenceController::class, 'update']);
+
+    Route::post('/security/2fa/request', [AuthController::class, 'request2FA']);
+    Route::post('/security/2fa/confirm', [AuthController::class, 'confirm2FA']);
+    Route::post('/security/2fa/disable', [AuthController::class, 'disable2FA']);
 
     Route::get('/weka/searchaccountsbyenterprise',[WekamemberaccountsController::class,'searchaccountsbyenterprise']);
     Route::post('/weka/searchsingleaccount',[WekamemberaccountsController::class,'searchSingleAccount']);
@@ -205,6 +243,10 @@ Route::middleware(['auth:sanctum'])->group(function () {
     Route::get('/user/transactions/weekly-stats',[WekaAccountsTransactionsController::class, 'getWeeklyCurrencyStats']);
     Route::get('/user/stats', [WekaAccountsTransactionsController::class, 'getUserStats']);
     Route::post('/weka/transactions/sendmoneyto', [WekaAccountsTransactionsController::class, 'sendMoneyAccountToAccount']);
+    Route::post('/weka/transactions/withdrawaccountaccount', [WekaAccountsTransactionsController::class, 'withdrawAccountToAccount']);
+    Route::post('/weka/transactions/withdrawaccountaccountpreview', [WekaAccountsTransactionsController::class, 'withdrawalAccountToAccountPreview']);
+    Route::post('/weka/transactions/collectorwithdrawaltomemberpreview', [WekaAccountsTransactionsController::class, 'collectorWithdrawalToMemberPreview']);
+    Route::post('/weka/transactions/validatecollectorwithdrawaltomember', [WekaAccountsTransactionsController::class, 'validateCollectorClientWithdraw']);
     Route::post('/weka/transactions/sendmoneytopreview', [WekaAccountsTransactionsController::class, 'sendMoneyAccountToAccountPreview']);
     Route::post('/weka/fees', [WekaAccountsTransactionsController::class, 'getTransactionFees']);
 
@@ -236,8 +278,19 @@ Route::middleware(['auth:sanctum'])->group(function () {
     Route::get('/weka/account/transferts/history',[WekatransfertsaccountsController::class,'getTransfersList']);
     Route::get('/weka/pending/sos-transferts',[WekatransfertsaccountsController::class,'indexPending']);
     Route::get('/weka/nbr-sos-transferts',[WekatransfertsaccountsController::class,'getNbrSosPending']);
-        
-    });
+    /**
+     * WITHDRAW REQUESTS
+     */
+    Route::post('/withdraw-requests', [WithdrawRequestController::class, 'store']);
+    Route::post('/withdraw-requests/{withdraw}/cancel',[WithdrawRequestController::class, 'cancel']); 
+    Route::get('/withdraw-requests/available', [WithdrawRequestController::class, 'available']);
+    Route::post('/withdraw-requests/{withdraw}/take', [WithdrawRequestController::class, 'take']);
+    Route::post('/withdraw-requests/{withdraw}/validate', [WithdrawRequestController::class, 'validateRequest']);
+    Route::post('/withdraw-requests/{withdraw}/complete', [WithdrawRequestController::class, 'complete']);
+    Route::get('/withdraw-requests/pending-count', [WithdrawRequestController::class, 'pendingCount']);
+    Route::get('/withdraw-requests/{id}',[WithdrawRequestController::class, 'show']);
+    Route::post('/withdraw-requests/{withdraw}/resend-otp',[WithdrawRequestController::class, 'resendOtp']);
+});
 
 
 /** Users getways */

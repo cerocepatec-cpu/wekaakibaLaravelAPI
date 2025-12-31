@@ -125,6 +125,20 @@ class wekamemberaccounts extends Model
             ->money ?? null;
     }
 
+    public static function findByMemberAndMoney($member, ?int $moneyId = null, ?string $abreviation = null)
+    {
+        return self::where('user_id', $member->id)
+            ->when($moneyId, fn ($q) =>
+                $q->where('money_id', $moneyId)
+            )
+            ->when($abreviation, fn ($q) =>
+                $q->whereHas('money', fn ($m) =>
+                    $m->where('abreviation', strtoupper($abreviation))
+                )
+            )
+            ->first();
+    }
+
     public static function getMoneyAbreviationByAccountNumber(string $accountNumber)
     {
         $account = self::where('account_number', $accountNumber)

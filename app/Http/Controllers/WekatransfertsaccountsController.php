@@ -7,8 +7,12 @@ use App\Models\User;
 use Illuminate\Support\Str;
 use App\Services\OTPService;
 use Illuminate\Http\Request;
+use App\Helpers\OtpQueueHelper;
+use App\Jobs\OTP\SendOtpSmsJob;
+use App\Services\BulkSmsService;
 use App\Models\wekamemberaccounts;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Log;
 use App\Http\Controllers\Controller;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\Mail;
@@ -118,7 +122,7 @@ class WekatransfertsaccountsController extends Controller
         }
     }
     
-    public function directDepositViaAgent(Request $request)
+    public function directDepositViaAgent(Request $request, BulkSmsService $sms)
 {
     $user = Auth::user();
     if (!$user) {
@@ -208,14 +212,38 @@ class WekatransfertsaccountsController extends Controller
                 422
             );
         }
+         try {
+            // new SendOtpSmsJob( $agent->user_phone, 
+            //    $agent->collector, 
+            //    $agent->id,  
+            //    $agent->email, 
+            //    $otp,  
+            //    'sms')->handle($sms);
+            OtpQueueHelper::send(
+                $agent->user_phone,
+                $agent->collector,
+                $agent->id,
+                $agent->email,
+                $otp,
+                $otpChannel ?? 'sms'
+            );
+
+            // réponse immédiate
+            // return response()->json([
+            //     'message' => "OTP en cours d'envoi",
+            //     'status' => "success"
+            // ]);
+        } catch (\Exception $e) {
+            return $this->errorResponse("Erreur lors de l'envoi de l'OTP : " . $e->getMessage());
+        }
         // 📧 Envoi OTP AU PROPRIÉTAIRE DU COMPTE SOURCE
-        Mail::raw(
-            "Votre code OTP pour confirmer la transaction est : {$otp}\n\nCe code expire dans 5 minutes.",
-            function ($message) use ($agent) {
-                $message->to($agent->email)
-                        ->subject("Confirmation de transaction");
-            }
-        );
+        // Mail::raw(
+        //     "Votre code OTP pour confirmer la transaction est : {$otp}\n\nCe code expire dans 5 minutes.",
+        //     function ($message) use ($agent) {
+        //         $message->to($agent->email)
+        //                 ->subject("Confirmation de transaction");
+        //     }
+        // );
 
         // 🧠 Stocker l'opération en attente
         Cache::put(

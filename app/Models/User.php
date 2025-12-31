@@ -50,9 +50,7 @@ class User extends Authenticatable implements CanResetPassword
         'remember_token',
         'email_verified_at',
         'laravel_through_key',
-        'pin',
-        'two_factor_enabled',
-        'two_factor_channel'
+        'pin'
     ];
 
     /**
@@ -60,6 +58,7 @@ class User extends Authenticatable implements CanResetPassword
      */
     protected $casts = [
         'email_verified_at' => 'datetime',
+        'two_factor_enabled'=>'boolean',
     ];
 
     /**
@@ -159,5 +158,49 @@ class User extends Authenticatable implements CanResetPassword
         }else{
             return true;
         }
-    }  
+    } 
+    
+   public static function allCollectorsFromEnterprise(int $enterpriseId): array
+    {
+        return self::query()
+            ->whereIn(
+                'id',
+                usersenterprise::where('enterprise_id', $enterpriseId)
+                    ->pluck('user_id')
+            )
+            ->where('collector',true)
+            ->where('status', 'enabled')
+            ->pluck('id')
+            ->toArray();
+    }
+
+    public function sessions()
+    {
+        return $this->hasMany(UserSession::class);
+    }
+
+    public function currentSession(): ?UserSession
+    {
+        return $this->sessions()
+            ->where('status', 'active')
+            ->whereNotNull('last_seen_at')
+            ->orderByDesc('last_seen_at')
+            ->first();
+    }
+
+    public function currentSessionByDevice(string $deviceType): ?UserSession
+    {
+        return $this->sessions()
+            ->where('device_type', $deviceType)
+            ->where('status', 'active')
+            ->whereNotNull('last_seen_at')
+            ->orderByDesc('last_seen_at')
+            ->first();
+    }
+
+    public function preferences()
+    {
+        return $this->hasOne(\App\Models\UserPreference::class);
+    }
+
 }
