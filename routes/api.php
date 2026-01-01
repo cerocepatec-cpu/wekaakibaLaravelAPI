@@ -7,6 +7,7 @@ use Illuminate\Support\Facades\File;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Route;
 use App\Http\Controllers\AuthController;
+use App\Http\Controllers\ChatController;
 use App\Http\Controllers\MailController;
 use App\Http\Controllers\BonusController;
 use App\Http\Controllers\DebtsController;
@@ -133,23 +134,6 @@ Route::middleware(['auth:sanctum','permission:agents.edit','session.lastseen'])-
     Route::post('/users/updatestatus',[UsersController::class,'changerStatus']);
     Route::post('/weka/member/updatecollectionpercentage',[UsersController::class,'updatecollectionpercentage']);
 }); 
-// routes/api.php
-// Route::post('/session/heartbeat', function (Request $request) {
-//     $user = auth()->user();
-//     $user=User::find($user->id);
-//     $session = $user?->currentSessionByDevice(
-//         $request->header('X-Device-Type')
-//     );
-
-//     if ($session) {
-//         $session->update([
-//             'last_seen_at' => now(),
-//         ]);
-//     }
-
-//     return response()->json(['ok' => true]);
-// })->middleware('auth:sanctum');
-
 
 Route::middleware(['auth:sanctum','session.lastseen'])->group(function () {
     Route::post('/session/heartbeat', function (Request $request) {
@@ -290,6 +274,18 @@ Route::middleware(['auth:sanctum','session.lastseen'])->group(function () {
     Route::get('/withdraw-requests/pending-count', [WithdrawRequestController::class, 'pendingCount']);
     Route::get('/withdraw-requests/{id}',[WithdrawRequestController::class, 'show']);
     Route::post('/withdraw-requests/{withdraw}/resend-otp',[WithdrawRequestController::class, 'resendOtp']);
+
+    /**
+     * CHAT ENDS POINTS
+     */
+    Route::post('/chat/send', [ChatController::class, 'send']);
+    Route::get('/chat/conversations', [ChatController::class, 'conversations']);
+    Route::get('/chat/conversations/{conversation}/messages', [ChatController::class, 'messages']);
+    Route::post('/chat/conversations/{conversation}/read', [ChatController::class, 'markAsRead']);
+    Route::post('/chat/conversations/{conversation}/archive', [ChatController::class, 'archive']);
+    Route::post('/chat/conversations/{conversation}/unarchive', [ChatController::class, 'unarchive']);
+    Route::post('/chat/conversations/{conversation}/pin', [ChatController::class, 'pin']);
+    Route::post('/chat/conversations/{conversation}/unpin', [ChatController::class, 'unpin']);
 });
 
 

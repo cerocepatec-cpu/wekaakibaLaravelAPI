@@ -203,4 +203,10 @@ class User extends Authenticatable implements CanResetPassword
         return $this->hasOne(\App\Models\UserPreference::class);
     }
 
+    public function conversations()
+    {
+        return $this->hasMany(ConversationParticipant::class);
+    }
+
+
 }
