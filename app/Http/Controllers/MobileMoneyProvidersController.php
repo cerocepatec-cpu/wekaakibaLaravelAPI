@@ -111,8 +111,6 @@ class MobileMoneyProvidersController extends Controller
                     'metadata'      => $provider->metadata,
                     'path'          => collect($provider->metadata)
                                         ->firstWhere('key', 'logo')['path'] ?? null,
-
-                    // 🔐 CONFIG USER
                     'user_phone'    => $userPivot?->phone_number,
                     'status'        => $userPivot?->status,
                     'is_configured' => $userPivot !== null,

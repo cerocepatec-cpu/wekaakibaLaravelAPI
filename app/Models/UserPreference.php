@@ -17,7 +17,11 @@ class UserPreference extends Model
         'daily_report',
         'weekly_report',
         'monthly_report',
+        'reports_send_time',
+        'funds_reminder_start_time',
+        'funds_reminder_end_time',
         'incident_reports',
+        'visibility'
     ];
 
     protected $casts = [
@@ -31,6 +35,9 @@ class UserPreference extends Model
         'weekly_report' => 'boolean',
         'monthly_report' => 'boolean',
         'incident_reports' => 'boolean',
+        'reports_send_time' => 'datetime:H:i',
+        'funds_reminder_start_time' => 'datetime:H:i',
+        'funds_reminder_end_time' => 'datetime:H:i',
     ];
 }
 

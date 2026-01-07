@@ -9,6 +9,7 @@ class ConversationParticipant extends Model
 {
     use HasFactory;
 
+        public $timestamps = false;
     protected $fillable = [
         'conversation_id',
         'user_id',

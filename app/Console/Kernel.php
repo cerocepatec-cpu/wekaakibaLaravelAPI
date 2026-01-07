@@ -23,7 +23,9 @@ class Kernel extends ConsoleKernel
         ->everyMinute()
         ->withoutOverlapping()
         ->onOneServer();
-         $schedule->command('sessions:cleanup')->everyMinute()->withoutOverlapping();
+        $schedule->command('sessions:cleanup')->everyMinute()->withoutOverlapping();
+        $schedule->command('reports:dispatch')->everyMinute();
+        $schedule->command('reports:cleanup')->hourly();
     }
 
     /**

@@ -187,6 +187,8 @@ Route::middleware(['auth:sanctum','session.lastseen'])->group(function () {
     Route::post('/roles/remove-from-users', [RolePermissionController::class, 'removeRoleFromUsers']);
 
     Route::post('/users/mobilemoneyproviders/new',[UsersMobileMoneyProvidersController::class,'store']);
+    Route::post('/mobile-money-phone/generate-otp', [UsersMobileMoneyProvidersController::class, 'generateOtp']);
+    Route::post('/mobile-money-phone/validate-otp', [UsersMobileMoneyProvidersController::class, 'validateOtp']);
 
     Route::post('/assign-role', [PermissionController::class, 'assignRole']);
     Route::post('/give-permission', [PermissionController::class, 'givePermissions']);
@@ -207,10 +209,13 @@ Route::middleware(['auth:sanctum','session.lastseen'])->group(function () {
     Route::get('/request_history/byfund/{fund}',[RequestHistoryController::class,'getbyfund']);
     Route::get('/settings', [UserPreferenceController::class, 'show']);
     Route::put('/settings', [UserPreferenceController::class, 'update']);
+    Route::get('/settings/kwc', [UserPreferenceController::class, 'invoke']);
 
     Route::post('/security/2fa/request', [AuthController::class, 'request2FA']);
     Route::post('/security/2fa/confirm', [AuthController::class, 'confirm2FA']);
     Route::post('/security/2fa/disable', [AuthController::class, 'disable2FA']);
+    Route::post('/security/requestverification', [AuthController::class, 'requestContactVerificationOtp']);
+    Route::post('/security/requestvalidation', [AuthController::class, 'validateContactVerificationOtp']);
 
     Route::get('/weka/searchaccountsbyenterprise',[WekamemberaccountsController::class,'searchaccountsbyenterprise']);
     Route::post('/weka/searchsingleaccount',[WekamemberaccountsController::class,'searchSingleAccount']);
@@ -278,6 +283,8 @@ Route::middleware(['auth:sanctum','session.lastseen'])->group(function () {
     /**
      * CHAT ENDS POINTS
      */
+    Route::get('/chat/search-users', [ChatController::class, 'searchUsers']);
+    Route::post('/chat/start', [ChatController::class, 'startPrivate']);
     Route::post('/chat/send', [ChatController::class, 'send']);
     Route::get('/chat/conversations', [ChatController::class, 'conversations']);
     Route::get('/chat/conversations/{conversation}/messages', [ChatController::class, 'messages']);

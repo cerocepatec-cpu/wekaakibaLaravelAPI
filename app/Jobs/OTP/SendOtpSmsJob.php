@@ -38,7 +38,7 @@ class SendOtpSmsJob implements ShouldQueue
 
     public function handle(BulkSmsService $sms): void
     {
-        // pour les collecteur => EMAIL uniquement
+        
         if ((int) $this->is_collector === 1) {
             Log::error('Réponse inconnue 2', [
                 'user_id' => $this->user_id,
@@ -77,7 +77,7 @@ class SendOtpSmsJob implements ShouldQueue
                         'user_id' => $this->user_id,
                         // 'response' => $response
                     ]);
-                    $response = $sms->send($messages);
+                    // $response = $sms->send($messages);
                     Log::error('Réponse inconnue 5', [
                         'user_id' => $this->user_id,
                         // 'response' => $response
@@ -85,51 +85,52 @@ class SendOtpSmsJob implements ShouldQueue
                     /**
                      * CAS 201 : tableau de messages ACCEPTED
                      */
-                    if (is_array($response) && isset($response[0]['status']['type'])) {
-                        Log::error('Réponse inconnue 6', [
-                            'user_id' => $this->user_id,
-                            // 'response' => $response
-                        ]);
-                        if ($response[0]['status']['type'] === 'ACCEPTED') {
-                            Log::error('Réponse inconnue 7', [
-                                'user_id' => $this->user_id,
-                                // 'response' => $response
-                            ]);
-                            return;
-                        }
-                        Log::error('Réponse inconnue 8', [
-                            'user_id' => $this->user_id,
-                            // 'response' => $response
-                        ]);
-                    }
+                    // if (is_array($response) && isset($response[0]['status']['type'])) {
+                    //     Log::error('Réponse inconnue 6', [
+                    //         'user_id' => $this->user_id,
+                    //         // 'response' => $response
+                    //     ]);
+                    //     if ($response[0]['status']['type'] === 'ACCEPTED') {
+                    //         Log::error('Réponse inconnue 7', [
+                    //             'user_id' => $this->user_id,
+                    //             // 'response' => $response
+                    //         ]);
+                    //         $this->sendEmail();
+                    //         return;
+                    //     }
+                    //     Log::error('Réponse inconnue 8', [
+                    //         'user_id' => $this->user_id,
+                    //         // 'response' => $response
+                    //     ]);
+                    // }
                     Log::error('Réponse inconnue 9', [
                         'user_id' => $this->user_id,
                         // 'response' => $response
                     ]);
-                    if (is_array($response) && isset($response['status'])) {
+                    // if (is_array($response) && isset($response['status'])) {
 
-                        Log::error('Échec SMS OTP BulkSMS', [
-                            'user_id' => $this->user_id,
-                            'status'  => $response['status'],
-                            'title'   => $response['title'] ?? null,
-                            'detail'  => $response['detail'] ?? null,
-                        ]);
+                    //     Log::error('Échec SMS OTP BulkSMS', [
+                    //         'user_id' => $this->user_id,
+                    //         'status'  => $response['status'],
+                    //         'title'   => $response['title'] ?? null,
+                    //         'detail'  => $response['detail'] ?? null,
+                    //     ]);
 
-                        $this->sendEmail();
-                        Log::error('Réponse inconnue 10', [
-                            'user_id' => $this->user_id,
-                            // 'response' => $response
-                        ]);
-                        Log::error('Réponse inconnue 11', [
-                            'user_id' => $this->user_id,
-                            // 'response' => $response
-                        ]);
-                        return;
-                    }
-                    Log::error('Réponse BulkSMS inconnue', [
-                        'user_id' => $this->user_id,
-                        'response' => $response
-                    ]);
+                    //     $this->sendEmail();
+                    //     Log::error('Réponse inconnue 10', [
+                    //         'user_id' => $this->user_id,
+                    //         // 'response' => $response
+                    //     ]);
+                    //     Log::error('Réponse inconnue 11', [
+                    //         'user_id' => $this->user_id,
+                    //         // 'response' => $response
+                    //     ]);
+                    //     return;
+                    // }
+                    // Log::error('Réponse BulkSMS inconnue', [
+                    //     'user_id' => $this->user_id,
+                    //     'response' => $response
+                    // ]);
 
                     $this->sendEmail();
                     Log::error('Réponse inconnue 12', [

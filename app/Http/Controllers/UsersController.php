@@ -82,9 +82,10 @@ class UsersController extends Controller
         }
     }
 
-    /** @var User $user */
+   
     public function index($enterprise_id)
     {
+         /** @var User $user */
         $user=Auth::user();
         if(!$user){
             return $this->errorResponse("Utilisateur non connecté");
@@ -2119,6 +2120,9 @@ public function store(Request $request)
      * WEKA AKIBA METHODS
      */
      public function wekamemberslist($enterprise_id){
+        /**
+         * @var User $user
+         */
         $user=Auth::user();
         if (!$user) {
             return response()->json([
@@ -2265,6 +2269,9 @@ public function store(Request $request)
      
    public function wekamemberslookup(Request $request)
     {
+        /**
+         * @var User $user
+         */
          $user=Auth::user();
         if (!$user) {
             return response()->json([

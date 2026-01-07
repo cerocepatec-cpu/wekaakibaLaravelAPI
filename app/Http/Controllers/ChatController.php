@@ -7,7 +7,10 @@ use App\Models\Message;
 use App\Models\Conversation;
 use Illuminate\Http\Request;
 use App\services\Chat\ChatService;
+use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Redis;
 use App\Models\ConversationParticipant;
+use App\Http\Resources\ConversationResource;
 
 class ChatController extends Controller
 {
@@ -61,105 +64,74 @@ class ChatController extends Controller
         /** @var User $user */
         $user = auth()->user();
 
-        $conversations = Conversation::query()
-            ->whereHas('participants', fn ($q) =>
+        // Charger les entreprises de l'utilisateur connecté
+        $user->load('enterprises:id,name');
+        $conversations = Conversation::whereHas('participants', fn ($q) =>
                 $q->where('user_id', $user->id)
-                  ->where('archived', false)
             )
             ->with([
-                'participants.user:id,name',
+                'participants.user:id,name,full_name',
                 'messages' => fn ($q) => $q->latest()->limit(1),
             ])
-            ->with(['participants' => fn ($q) =>
-                $q->where('user_id', $user->id)
-            ])
-            ->orderByDesc(
-                Message::select('created_at')
-                    ->whereColumn('conversation_id', 'conversations.id')
-                    ->latest()
-                    ->limit(1)
-            )
             ->get()
-            ->map(function (Conversation $conversation) use ($user) {
-
-                /** @var ConversationParticipant $participant */
-                $participant = $conversation->participants->first();
-
-                $lastReadAt = $participant?->last_read_at;
-
-                $unreadCount = Message::where('conversation_id', $conversation->id)
-                    ->where('sender_id', '!=', $user->id)
-                    ->when($lastReadAt, fn ($q) =>
-                        $q->where('created_at', '>', $lastReadAt)
-                    )
-                    ->count();
-
-                return [
-                    'id' => $conversation->id,
-                    'type' => $conversation->type,
-                    'status' => $conversation->status,
-                    'title' => $conversation->title,
-                    'last_message' => $conversation->messages->first(),
-                    'unread_count' => $unreadCount,
-
-                    // 👤 Préférences utilisateur
-                    'pinned' => $participant->pinned,
-                    'muted' => $participant->muted,
-                    'archived' => $participant->archived,
-                    'notifications_enabled' => $participant->notifications_enabled,
-
-                    'participants' => $conversation->participants->map(fn ($p) => [
-                        'id' => $p->user->id,
-                        'name' => $p->user->name,
-                    ]),
-                ];
-            })
-            // 📌 Conversations épinglées en haut
-            ->sortByDesc(fn ($c) => $c['pinned'])
+            ->sortByDesc(fn ($c) => $c->messages->first()?->created_at)
             ->values();
 
-        return response()->json($conversations);
+        return ConversationResource::collection($conversations)
+        ->map(fn ($res) => $res->forUser($user));
     }
+
 
     /* =============================
        MESSAGES D'UNE CONVERSATION
     ============================= */
-    public function messages(Conversation $conversation)
+   public function messages(Conversation $conversation)
     {
         /** @var User $user */
         $user = auth()->user();
 
-        /** @var ConversationParticipant $participant */
-        $participant = ConversationParticipant::where([
-            'conversation_id' => $conversation->id,
-            'user_id' => $user->id,
-        ])->firstOrFail();
+        // 🔐 Sécurité : vérifier que l’utilisateur participe à la conversation
+        abort_unless(
+            $conversation->participants()
+                ->where('user_id', $user->id)
+                ->exists(),
+            403
+        );
 
         $messages = Message::where('conversation_id', $conversation->id)
             ->with('sender:id,name')
             ->orderByDesc('created_at')
             ->paginate(30);
 
-        // 👁️ Marquer comme lu
-        $participant->markAsRead();
-
         return response()->json($messages);
     }
+
 
     /* =============================
        MARQUER COMME LU (MANUEL)
     ============================= */
     public function markAsRead(Conversation $conversation)
     {
-        /** @var User $user */
+        /** @var \App\Models\User $user */
         $user = auth()->user();
 
+        // 🔐 Sécurité : vérifier la participation
         $participant = ConversationParticipant::where([
             'conversation_id' => $conversation->id,
             'user_id' => $user->id,
         ])->firstOrFail();
 
-        $participant->markAsRead();
+        // 👁️ Marquer comme lu
+        $participant->markAsReadAt(now());
+
+        // 🔔 Notifier en temps réel (optionnel)
+        Redis::publish('chat-read', json_encode([
+            'event' => 'chat.read',
+            'data' => [
+                'conversationId' => $conversation->id,
+                'userId' => $user->id,
+            ],
+        ]));
 
         return response()->json(['status' => 'ok']);
     }
@@ -229,4 +201,108 @@ class ChatController extends Controller
 
         return response()->json(['pinned' => false]);
     }
+
+    public function startPrivate(Request $request)
+    {
+        $request->validate([
+            'user_id' => 'required|exists:users,id',
+        ]);
+
+        /** @var User $me */
+        $me = auth()->user();
+        $other = User::findOrFail($request->user_id);
+
+        $conversation = DB::transaction(function () use ($me, $other) {
+            return $this->chatService
+                ->getOrCreatePrivateConversation($me, $other);
+        });
+
+        // Charger relations une seule fois
+        $conversation->load([
+            'participants.user:id,name,full_name',
+            'messages' => fn ($q) => $q->latest()->limit(1),
+        ]);
+
+        // 🔁 Formater POUR CHAQUE USER
+        $forMe = (new ConversationResource($conversation))->forUser($me)->resolve();
+        $forOther = (new ConversationResource($conversation))->forUser($other)->resolve();
+
+        // 🔔 PUSH TEMPS RÉEL INTELLIGENT
+        Redis::publish('chat.conversation.created', json_encode([
+            'users' => [
+                $me->id => $forMe,
+                $other->id => $forOther,
+            ],
+        ]));
+
+        // ✅ Retour HTTP (pour l’initiateur)
+        return response()->json($forMe);
+    }
+
+   public function searchUsers(Request $request)
+{
+    $q = trim($request->get('q'));
+    $me = auth()->user();
+
+    if (strlen($q) < 2) {
+        return response()->json([]);
+    }
+
+    $users = User::where('id', '!=', $me->id)
+
+        // 🔐 visibilité publique uniquement
+        ->whereHas('preference', function ($q) {
+            $q->where('visibility', 'public');
+        })
+
+        ->where(function ($query) use ($q) {
+            $query->where('name', 'like', "%{$q}%")
+                ->orWhere('full_name', 'like', "%{$q}%")
+                ->orWhere('user_name', 'like', "%{$q}%")
+                ->orWhere('email', 'like', "%{$q}%")
+                ->orWhere('user_phone', 'like', "%{$q}%")
+                ->orWhere('uuid', 'like', "%{$q}%");
+        })
+        ->select([
+            'id',
+            'uuid',
+            'user_name',
+            'full_name',
+            'name',
+            'email',
+            'user_phone',
+        ])
+        ->limit(20)
+        ->get();
+
+    $users = $users->map(function ($user) use ($me) {
+
+        $conversation = Conversation::where('type', 'private')
+            ->whereHas('participants', fn ($q) =>
+                $q->where('user_id', $me->id)
+            )
+            ->whereHas('participants', fn ($q) =>
+                $q->where('user_id', $user->id)
+            )
+            ->first();
+
+        return [
+            'id' => $user->id,
+            'uuid' => $user->uuid,
+            'user_name' => $user->user_name,
+            'full_name' => $user->full_name,
+            'name' => $user->name,
+            'email' => $user->email,
+            'user_phone' => $user->user_phone,
+
+            // 💬 Chat info
+            'hasConversation' => (bool) $conversation,
+            'conversation_id' => $conversation?->id,
+        ];
+    });
+
+    return response()->json($users);
+}
+
+
 }

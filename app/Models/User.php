@@ -39,7 +39,9 @@ class User extends Authenticatable implements CanResetPassword
         'can_withdraw_by_agent',
         'adress',
         'two_factor_enabled',
-        'two_factor_channel'
+        'two_factor_channel',
+        'phone_verified_at',
+        'timezone'
     ];
 
     /**
@@ -48,6 +50,7 @@ class User extends Authenticatable implements CanResetPassword
     protected $hidden = [
         'password',
         'remember_token',
+        'phone_verified_at',
         'email_verified_at',
         'laravel_through_key',
         'pin'
@@ -89,6 +92,16 @@ class User extends Authenticatable implements CanResetPassword
     public function tokens()
     {
         return $this->morphMany(PersonalAccessToken::class, 'tokenable');
+    }
+
+    public function enterprises()
+    {
+        return $this->belongsToMany(
+            Enterprises::class,
+            'usersenterprises',
+            'user_id',
+            'enterprise_id'
+        );
     }
 
     public function usersenterprise()

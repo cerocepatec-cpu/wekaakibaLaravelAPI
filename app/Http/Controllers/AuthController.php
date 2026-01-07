@@ -7,14 +7,15 @@ use App\Models\User;
 use App\Models\UserSession;
 use Illuminate\Support\Str;
 use Jenssegers\Agent\Agent;
+use App\Helpers\PhoneHelper;
 use App\Models\RefreshToken;
 use Illuminate\Http\Request;
 use App\Models\PasswordReset;
+use App\Helpers\OtpQueueHelper;
 use App\Models\TwoFactorRequest;
 use App\Services\TwoFactorService;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
-use App\Jobs\SendSecurityLoginAlert;
 use App\Services\UserSessionService;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\Hash;
@@ -22,7 +23,6 @@ use Illuminate\Support\Facades\Mail;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Redis;
 use App\Mail\PasswordResetSuccessMail;
-use Illuminate\Support\Facades\Password;
 use Laravel\Sanctum\PersonalAccessToken;
 use Illuminate\Support\Facades\Validator;
 use App\Mail\PasswordChangedSecurityAlert;
@@ -37,15 +37,15 @@ class AuthController extends Controller
     protected int $maxAttempts = 5;
     protected int $lockoutSeconds = 15 * 60; // 15 minutes
 
-     /**
+    /**
      * 1) Demande d’activation 2FA → envoi OTP par EMAIL
      */
-   public function request2FA()
+    public function request2FA()
     {
         $user = auth()->user();
 
         if (!$user->email || !$user->email_verified_at) {
-            return $this->errorResponse('Email non valide ou non vérifié.',422);
+            return $this->errorResponse('Email non valide ou non vérifié.', 422);
         }
 
         $cacheKey = "2fa_enable_{$user->id}";
@@ -53,7 +53,7 @@ class AuthController extends Controller
 
         // ⛔ Anti spam (cooldown)
         if ($existing && now()->timestamp < ($existing['resend_available_at'] ?? 0)) {
-            return $this->errorResponse('Veuillez patienter avant de renvoyer le code.',429);
+            return $this->errorResponse('Veuillez patienter avant de renvoyer le code.', 429);
         }
 
         $otp = random_int(100000, 999999);
@@ -67,7 +67,7 @@ class AuthController extends Controller
 
         Mail::raw(
             "Code de confirmation WEKA AKIBA : {$otp}\n\nExpire dans 5 minutes.",
-            fn ($m) => $m->to($user->email)->subject('Code 2FA – WEKA AKIBA')
+            fn($m) => $m->to($user->email)->subject('Code 2FA – WEKA AKIBA')
         );
 
         return response()->json([
@@ -77,14 +77,214 @@ class AuthController extends Controller
         ]);
     }
 
+   public function requestContactVerificationOtp(Request $request)
+    {
+        $user = auth()->user();
+
+        $data = $request->validate([
+            'channel' => 'required|in:email,phone',
+            'email'   => 'required_if:channel,email|email',
+            'phone'   => 'required_if:channel,phone|string|min:9',
+        ]);
+
+        // 📞 Validation métier téléphone (helper existant)
+        if ($data['channel'] === 'phone') {
+            if (!PhoneHelper::isValidPhoneNumber($data['phone'], 'CD')) {
+                return $this->errorResponse("Numéro invalide", 422);
+            }
+        }
+
+        $channel = $data['channel'];
+
+        $destination = $channel === 'email'
+            ? $data['email']
+            : $data['phone'];
+
+        $cacheKey = "verify_contact_{$user->id}_{$channel}_" . sha1($destination);
+
+        $existing = Cache::get($cacheKey);
+
+        if ($existing && now()->timestamp < ($existing['resend_available_at'] ?? 0)) {
+            return $this->errorResponse(
+                'Veuillez patienter avant de renvoyer le code.',
+                429
+            );
+        }
+
+        $otp = random_int(100000, 999999);
+
+        Cache::put($cacheKey, [
+            'otp' => (string) $otp,
+            'channel' => $channel,
+            'destination' => $destination,
+            'attempts' => 0,
+            'expires_at' => now()
+                ->addMinutes(self::OTP_TTL_MINUTES)
+                ->timestamp,
+            'resend_available_at' => now()
+                ->addSeconds(self::OTP_RESEND_COOLDOWN)
+                ->timestamp,
+        ], now()->addMinutes(self::OTP_TTL_MINUTES));
+
+        if ($channel === 'email') {
+
+            Mail::raw(
+                "Votre code de vérification WEKA AKIBA : {$otp}\n\nExpire dans 5 minutes.",
+                fn ($m) => $m
+                    ->to($destination)
+                    ->subject('Code de vérification – WEKA AKIBA')
+            );
+
+        } else {
+
+            try {
+                OtpQueueHelper::send(
+                    $destination,
+                    $user->collector,
+                    $user->id,
+                    $user->email,
+                    $otp,
+                    'sms'
+                );
+            } catch (\Throwable $e) {
+
+                Cache::forget($cacheKey);
+
+                return $this->errorResponse(
+                    "Erreur lors de l'envoi de l'OTP : " . $e->getMessage(),
+                    500
+                );
+            }
+        }
+
+        return response()->json([
+            'status' => 'success',
+            'message' => "Code envoyé par {$channel}.",
+            'expires_in' => self::OTP_TTL_MINUTES * 60
+        ]);
+    }
+
+    public function validateContactVerificationOtp(Request $request)
+    {
+        /** @var User $user */
+        $user = auth()->user();
+
+        $data = $request->validate([
+            'channel' => 'required|in:email,phone',
+            'email'   => 'required_if:channel,email|email',
+            'phone'   => 'required_if:channel,phone|string|min:9',
+            'otp'     => 'required|string|size:6',
+        ]);
+
+        // 📞 Validation métier téléphone (helper)
+        if ($data['channel'] === 'phone') {
+            if (!PhoneHelper::isValidPhoneNumber($data['phone'], 'CD')) {
+                return $this->errorResponse("Numéro invalide", 422);
+            }
+        }
+
+        $channel = $data['channel'];
+
+        $destination = $channel === 'email'
+            ? $data['email']
+            : $data['phone'];
+
+        $cacheKey = "verify_contact_{$user->id}_{$channel}_" . sha1($destination);
+
+        $cached = Cache::get($cacheKey);
+
+        // ❌ Cache absent
+        if (!$cached) {
+            return $this->errorResponse('Code expiré ou invalide.', 410);
+        }
+
+        // ⏱ Expiration
+        if (now()->timestamp > $cached['expires_at']) {
+            Cache::forget($cacheKey);
+            return $this->errorResponse('Code expiré.', 410);
+        }
+
+        // 🚫 Tentatives max
+        if ($cached['attempts'] >= 5) {
+            Cache::forget($cacheKey);
+            return $this->errorResponse('Trop de tentatives.', 429);
+        }
+
+        // ❌ OTP incorrect
+        if ($cached['otp'] !== $data['otp']) {
+            $cached['attempts']++;
+            Cache::put(
+                $cacheKey,
+                $cached,
+                now()->addMinutes(self::OTP_TTL_MINUTES)
+            );
+
+            return $this->errorResponse('Code incorrect.', 422);
+        }
+
+        // ✅ OTP correct → validations finales
+        if ($channel === 'phone') {
+
+            // 🔒 Unicité téléphone
+            $phoneAlreadyUsed = User::where('user_phone', $destination)
+                ->where('id', '!=', $user->id)
+                ->exists();
+
+            if ($phoneAlreadyUsed) {
+                Cache::forget($cacheKey);
+
+                return $this->errorResponse(
+                    'Ce numéro de téléphone est déjà utilisé par un autre compte.',
+                    422
+                );
+            }
+
+            $user->update([
+                'user_phone' => $destination,
+                'phone_verified_at' => now(),
+            ]);
+
+        } else {
+
+            // 🔒 Unicité email
+            $emailAlreadyUsed = User::where('email', $destination)
+                ->where('id', '!=', $user->id)
+                ->exists();
+
+            if ($emailAlreadyUsed) {
+                Cache::forget($cacheKey);
+
+                return $this->errorResponse(
+                    'Cette adresse email est déjà utilisée par un autre compte.',
+                    422
+                );
+            }
+
+            $user->update([
+                'email' => $destination,
+                'email_verified_at' => now(),
+            ]);
+        }
+
+        // 🧹 Nettoyage cache
+        Cache::forget($cacheKey);
+        
+        return $this->successResponse('success',['channel' => $channel,
+            'value' => $destination,
+            'user' => [
+                'id' => $user->id,
+                'email' => $user->email,
+                'user_phone' => $user->user_phone,
+            ]]);
+    }
 
     /**
      * 2) Confirmation OTP → activation réelle du 2FA (EMAIL)
      */
     public function confirm2FA(Request $request)
     {
-         /** @var User $user */
-        $user =Auth::user();
+        /** @var User $user */
+        $user = Auth::user();
 
         $data = $request->validate([
             'otp' => 'required|string'
@@ -94,26 +294,26 @@ class AuthController extends Controller
         $cached = Cache::get($cacheKey);
 
         if (!$cached) {
-            return $this->errorResponse('Code expiré. Veuillez en demander un nouveau.',422);
+            return $this->errorResponse('Code expiré. Veuillez en demander un nouveau.', 422);
         }
 
         // ⏱️ Expiration
         if (now()->timestamp > $cached['expires_at']) {
             Cache::forget($cacheKey);
-            return $this->errorResponse('Code expiré OTP.',422);
+            return $this->errorResponse('Code expiré OTP.', 422);
         }
 
         // 🧪 Tentatives max
         if ($cached['attempts'] >= self::OTP_MAX_ATTEMPTS) {
             Cache::forget($cacheKey);
-            return $this->errorResponse('Trop de tentatives. Activation bloquée.',429);
+            return $this->errorResponse('Trop de tentatives. Activation bloquée.', 429);
         }
 
         // ❌ Mauvais OTP
         if ($cached['otp'] !== $data['otp']) {
             $cached['attempts']++;
             Cache::put($cacheKey, $cached, now()->addMinutes(self::OTP_TTL_MINUTES));
-            return $this->errorResponse('Code incorrect.',422);
+            return $this->errorResponse('Code incorrect.', 422);
         }
 
         // ✅ Succès → activer 2FA
@@ -133,7 +333,7 @@ class AuthController extends Controller
      */
     public function disable2FA()
     {
-         /** @var User $user */
+        /** @var User $user */
         $user = Auth::user();
 
         $user->update([
@@ -143,7 +343,7 @@ class AuthController extends Controller
 
         Cache::forget("2fa_enable_{$user->id}");
 
-        return $this->successResponse('success',[]);
+        return $this->successResponse('success', []);
     }
 
     public function verifyPin(Request $request)
@@ -701,7 +901,7 @@ class AuthController extends Controller
                         $q->where('users.email', $login);
                     } else {
                         $q->where('users.uuid', $login)
-                          ->orWhere('users.user_name', $login);
+                            ->orWhere('users.user_name', $login);
                     }
                 })
                 ->select('users.*', 'UE.enterprise_id')
@@ -721,12 +921,12 @@ class AuthController extends Controller
                 )
             ) {
                 UserSession::where('user_id', $user->id)
-                ->where('device_type', $deviceType)
-                ->where('status', 'active')
-                ->where('last_seen_at', '<', now()->subMinutes(2))
-                ->update([
-                    'status' => 'expired',
-                ]);
+                    ->where('device_type', $deviceType)
+                    ->where('status', 'active')
+                    ->where('last_seen_at', '<', now()->subMinutes(2))
+                    ->update([
+                        'status' => 'revoked',
+                    ]);
 
                 // ⚠️ Une session ACTIVE et VIVANTE existe réellement
 
@@ -742,7 +942,7 @@ class AuthController extends Controller
                     'data' => [
                         'userId'      => $user->id,
                         'pending_id'  => $pendingId,
-                        'device_type'=> $deviceType,
+                        'device_type' => $deviceType,
                         'ip'          => $request->ip(),
                         'user_agent'  => $request->userAgent(),
                     ]
@@ -785,7 +985,6 @@ class AuthController extends Controller
 
             // ⬇️ LOGIN DIRECT (aucune session vivante + pas de 2FA)
             return $this->finalizeLogin($user, $deviceType, $request);
-
         } catch (\Throwable $e) {
             DB::rollBack();
             return $this->errorResponse('error', $e->getMessage(), 500);
@@ -1643,7 +1842,7 @@ class AuthController extends Controller
         return response()->json(['status' => 'pending']);
     }
 
-    
+
 
     // public function completeLogin(Request $request)
     // {

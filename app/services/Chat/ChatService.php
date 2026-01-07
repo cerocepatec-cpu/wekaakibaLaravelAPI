@@ -41,7 +41,7 @@ class ChatService
     }
 
 
-    public function sendMessage(
+   public function sendMessage(
         int $conversationId,
         ?int $senderId,
         string $content,
@@ -49,6 +49,7 @@ class ChatService
         ?string $clientUuid = null,
         ?array $meta = null
     ): Message {
+
         $message = Message::create([
             'conversation_id' => $conversationId,
             'sender_id'       => $senderId,
@@ -59,47 +60,71 @@ class ChatService
             'meta'            => $meta,
         ]);
 
-        Redis::publish('chat.messages', json_encode([
-            'conversation_id' => $conversationId,
-            'message_id'      => $message->id,
+        // 🔹 récupérer les participants
+        $participants = ConversationParticipant::where('conversation_id', $conversationId)
+            ->pluck('user_id')
+            ->toArray();
+
+      Redis::publish('chat-messages', json_encode([
+            'event' => 'chat.new-message',
+            'data' => [
+                'conversationId' => $conversationId,
+                'message' => [
+                'id' => $message->id,
+                'conversation_id' => $conversationId,
+                'sender_id' => $senderId,
+                'content' => $content,
+                'type' => $type,
+                'created_at' => $message->created_at,
+                ],
+                'participants' => $participants,
+            ],
         ]));
 
         return $message;
     }
 
 
-   public function systemMessage(
-    string $scope,
-    ?int $targetId,
-    string $content
+    public function systemMessage(
+        string $scope,
+        ?int $targetId,
+        string $content
     ): Message {
 
         $conversationId = match ($scope) {
             'user' => $this->getSystemConversationForUser($targetId),
-           'group' => Conversation::where('id', $targetId)
-    ->where('type', 'group')
-    ->value('id') 
-    ?? throw new \InvalidArgumentException('Invalid group conversation'),
+
+            'group' => Conversation::where('id', $targetId)
+                ->where('type', 'group')
+                ->value('id')
+                ?? throw new \InvalidArgumentException('Invalid group conversation'),
+
             'all' => $this->getGlobalSystemConversation(),
+
             default => throw new \InvalidArgumentException('Invalid scope'),
         };
 
         $message = Message::create([
             'conversation_id' => $conversationId,
-            'sender_id' => null,
-            'type' => 'system',
-            'content' => $content,
+            'sender_id'       => null,
+            'type'            => 'system',
+            'content'         => $content,
+            'status'          => 'sent',
         ]);
 
-        Redis::publish('chat.system', json_encode([
-            'scope' => $scope,
-            'target_id' => $targetId,
-            'conversation_id' => $conversationId,
-            'message_id' => $message->id,
+        Redis::publish('chat-system', json_encode([
+            'event' => 'chat.system',
+            'data' => [
+                'scope'          => $scope,
+                'targetId'       => $targetId,
+                'conversationId' => $conversationId,
+                'messageId'      => $message->id,
+            ],
         ]));
 
-        return $message; // ✅ FIX MAJEUR
+        return $message;
     }
+
 
     protected function getGlobalSystemConversation(): int
     {
