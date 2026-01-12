@@ -29,7 +29,7 @@ class ChatController extends Controller
             'client_uuid' => 'nullable|uuid',
             'meta' => 'nullable|array',
         ]);
-
+        $conversationId=$data['conversation_id'];
         /** @var User $user */
         $user = auth()->user();
 
@@ -46,13 +46,31 @@ class ChatController extends Controller
             'Conversation verrouillée'
         );
 
-        return $this->chatService->sendMessage(
+        $message = $this->chatService->sendMessage(
             $data['conversation_id'],
             $user->id,
             $data['content'],
             'text',
             $data['client_uuid'] ?? null,
             $data['meta'] ?? null
+        )->load('sender:id,name');
+
+             // 🔹 récupérer les participants
+        $participants = ConversationParticipant::where('conversation_id', $conversationId)
+            ->pluck('user_id')
+            ->toArray();
+
+      Redis::publish('chat-messages', json_encode([
+            'event' => 'chat.new-message',
+            'data' => [
+                'conversationId' => $conversationId,
+                'message' => $message,
+                'participants' => $participants,
+            ],
+        ]));
+
+        return $this->successResponse(
+            "success",$message
         );
     }
 
@@ -81,6 +99,25 @@ class ChatController extends Controller
         ->map(fn ($res) => $res->forUser($user));
     }
 
+    public function show($conversationId)
+{
+    /** @var User $user */
+    $user = auth()->user();
+
+    // Vérifier que l'utilisateur est bien participant
+    $conversation = Conversation::where('id', $conversationId)
+        ->whereHas('participants', fn ($q) =>
+            $q->where('user_id', $user->id)
+        )
+        ->with([
+            'participants.user:id,name,full_name',
+            'messages' => fn ($q) => $q->latest()->limit(1),
+        ])
+        ->firstOrFail();
+
+    return (new ConversationResource($conversation))
+        ->forUser($user);
+}
 
     /* =============================
        MESSAGES D'UNE CONVERSATION
@@ -244,14 +281,14 @@ class ChatController extends Controller
     $q = trim($request->get('q'));
     $me = auth()->user();
 
-    if (strlen($q) < 2) {
-        return response()->json([]);
-    }
+    // if (strlen($q) < 2) {
+    //     return response()->json([]);
+    // }
 
     $users = User::where('id', '!=', $me->id)
 
         // 🔐 visibilité publique uniquement
-        ->whereHas('preference', function ($q) {
+        ->whereHas('preferences', function ($q) {
             $q->where('visibility', 'public');
         })
 
@@ -294,8 +331,6 @@ class ChatController extends Controller
             'name' => $user->name,
             'email' => $user->email,
             'user_phone' => $user->user_phone,
-
-            // 💬 Chat info
             'hasConversation' => (bool) $conversation,
             'conversation_id' => $conversation?->id,
         ];
@@ -304,5 +339,26 @@ class ChatController extends Controller
     return response()->json($users);
 }
 
+    public function typing(Request $request)
+    {
+        $data = $request->validate([
+            'conversation_id' => 'required|exists:conversations,id',
+        ]);
+
+        $user = auth()->user();
+
+        Redis::publish('chat-typing', json_encode([
+            'event' => 'chat.typing',
+            'data' => [
+                'conversationId' => $data['conversation_id'],
+                'user' => [
+                    'id' => $user->id,
+                    'name' => $user->name,
+                ],
+            ],
+        ]));
+
+        return response()->json(['status' => 'ok']);
+    }
 
 }

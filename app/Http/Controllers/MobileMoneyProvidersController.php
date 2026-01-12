@@ -62,76 +62,7 @@ class MobileMoneyProvidersController extends Controller
             return $this->errorResponse('Une erreur est survenue', 500);
         }
     }
-
-    public function indexWithUserConfig($enterpriseId)
-    {
-        $user = Auth::user();
-        if (!$user) {
-            return $this->errorResponse('Utilisateur non authentifié', 401);
-        }
-
-        if (!is_numeric($enterpriseId)) {
-            return $this->errorResponse('Enterprise ID invalide', 400);
-        }
-
-        $enterprise = $this->getEse($user->id);
-        if (!$enterprise) {
-            return $this->errorResponse('Entreprise introuvable', 404);
-        }
-
-        if ($enterprise->id != $enterpriseId) {
-            return $this->errorResponse("Vous n'appartenez pas à cette entreprise", 403);
-        }
-
-        try {
-            // Providers actifs de l'entreprise
-            $providers = MobileMoneyProviders::where('enterprise_id', $enterpriseId)
-                ->where('status', 'enabled')
-                ->with(['users' => function ($q) use ($user) {
-                    $q->where('user_id', $user->id);
-                }])
-                ->get();
-
-            if ($providers->isEmpty()) {
-                return $this->errorResponse(
-                    'Aucun provider mobile money trouvé pour cette entreprise',
-                    404
-                );
-            }
-
-            // Mapping clean pour le frontend
-            $data = $providers->map(function ($provider) {
-
-                $userPivot = $provider->users->first()?->pivot;
-
-                return [
-                    'id'            => $provider->id,
-                    'provider'      => $provider->provider,
-                    'name'          => $provider->name,
-                    'metadata'      => $provider->metadata,
-                    'path'          => collect($provider->metadata)
-                                        ->firstWhere('key', 'logo')['path'] ?? null,
-                    'user_phone'    => $userPivot?->phone_number,
-                    'status'        => $userPivot?->status,
-                    'is_configured' => $userPivot !== null,
-                ];
-            });
-
-            return response()->json([
-                'status'  => 200,
-                'message' => 'success',
-                'error'   => null,
-                'data'    => $data,
-            ]);
-
-        } catch (\Throwable $e) {
-            return $this->errorResponse(
-                $e->getMessage(),
-                500
-            );
-        }
-    } 
-
+    
     public function depositbymobilemoney(Request $request)
     {
         $user=Auth::user();

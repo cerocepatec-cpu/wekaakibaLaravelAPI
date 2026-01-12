@@ -60,26 +60,6 @@ class ChatService
             'meta'            => $meta,
         ]);
 
-        // 🔹 récupérer les participants
-        $participants = ConversationParticipant::where('conversation_id', $conversationId)
-            ->pluck('user_id')
-            ->toArray();
-
-      Redis::publish('chat-messages', json_encode([
-            'event' => 'chat.new-message',
-            'data' => [
-                'conversationId' => $conversationId,
-                'message' => [
-                'id' => $message->id,
-                'conversation_id' => $conversationId,
-                'sender_id' => $senderId,
-                'content' => $content,
-                'type' => $type,
-                'created_at' => $message->created_at,
-                ],
-                'participants' => $participants,
-            ],
-        ]));
 
         return $message;
     }

@@ -134,7 +134,7 @@ class UserPreferenceController extends Controller
         
          $kwc = $kwcService->calculate($user);
 
-        Redis::publish('user.preferences', json_encode([
+        Redis::publish('user.preferences', json_encode([ 
             'type' => 'nbr-kwc',
             'data' => ['user_id' => $user->id,'kwc' => $kwc]
         ])); 

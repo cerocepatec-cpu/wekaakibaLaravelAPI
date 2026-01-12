@@ -187,6 +187,7 @@ Route::middleware(['auth:sanctum','session.lastseen'])->group(function () {
     Route::post('/roles/remove-from-users', [RolePermissionController::class, 'removeRoleFromUsers']);
 
     Route::post('/users/mobilemoneyproviders/new',[UsersMobileMoneyProvidersController::class,'store']);
+    Route::get('/weka/settings/mobilemoneyproviders/enterprise/{id}',[UsersMobileMoneyProvidersController::class,'indexWithUserConfig']);
     Route::post('/mobile-money-phone/generate-otp', [UsersMobileMoneyProvidersController::class, 'generateOtp']);
     Route::post('/mobile-money-phone/validate-otp', [UsersMobileMoneyProvidersController::class, 'validateOtp']);
 
@@ -243,7 +244,6 @@ Route::middleware(['auth:sanctum','session.lastseen'])->group(function () {
     Route::post('/expenditures/doneby',[ExpendituresController::class,'doneby']);
     Route::get('/weka/transactionspaginated',[WekaAccountsTransactionsController::class,'getTransactionslistByUser']);
     Route::get('/weka/mobilemoneyproviders/enterprise/{id}',[MobileMoneyProvidersController::class,'index']);
-    Route::get('/weka/settings/mobilemoneyproviders/enterprise/{id}',[MobileMoneyProvidersController::class,'indexWithUserConfig']);
     Route::post('/weka/accounts/depositbymobilemoney',[MobileMoneyProvidersController::class,'depositbymobilemoney']);
     Route::post('/weka/accounts/withdrawbymobilemoney',[MobileMoneyProvidersController::class,'withdrawbymobilemoney']);
    
@@ -287,6 +287,7 @@ Route::middleware(['auth:sanctum','session.lastseen'])->group(function () {
     Route::post('/chat/start', [ChatController::class, 'startPrivate']);
     Route::post('/chat/send', [ChatController::class, 'send']);
     Route::get('/chat/conversations', [ChatController::class, 'conversations']);
+     Route::get('/chat/conversations/{conversation}', [ChatController::class, 'show']);
     Route::get('/chat/conversations/{conversation}/messages', [ChatController::class, 'messages']);
     Route::post('/chat/conversations/{conversation}/read', [ChatController::class, 'markAsRead']);
     Route::post('/chat/conversations/{conversation}/archive', [ChatController::class, 'archive']);

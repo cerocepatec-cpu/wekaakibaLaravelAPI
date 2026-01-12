@@ -9,7 +9,9 @@ use App\Helpers\OtpQueueHelper;
 use App\Http\Controllers\Controller;
 use App\Models\MobileMoneyProviders;
 use Illuminate\Support\Facades\Auth;
+use Illuminate\Support\Facades\Mail;
 use Illuminate\Support\Facades\Cache;
+use Illuminate\Support\Facades\Redis;
 use App\Models\UsersMobileMoneyProviders;
 use Illuminate\Support\Facades\Validator;
 
@@ -69,14 +71,23 @@ class UsersMobileMoneyProvidersController extends Controller
 
             // 📩 Envoi SMS
             try {
-                OtpQueueHelper::send(
-                    $request->phone_number,
-                    $user->collector,
-                    $user->id,
-                    $user->email,
-                    $otp,
-                    'sms'
+
+                
+                Mail::raw(
+                    "Votre OTP de confirmation est : {$otp}",
+                    function ($message) use ($user) {
+                        $message->to($user->email)
+                            ->subject('OTP de confirmation');
+                    }
                 );
+                // OtpQueueHelper::send(
+                //     $request->phone_number,
+                //     $user->collector,
+                //     $user->id,
+                //     $user->email,
+                //     $otp,
+                //     'sms'
+                // );
             } catch (\Exception $e) {
                 Cache::forget($cacheKey);
                 return $this->errorResponse(
@@ -99,46 +110,267 @@ class UsersMobileMoneyProvidersController extends Controller
     }
 
     public function validateOtp(Request $request)
+{
+    $request->validate([
+        'mobile_money_provider_id' => 'required|integer',
+        'otp'                      => 'required|string',
+    ]);
+
+    $user       = Auth::user();
+    $providerId = (int) $request->mobile_money_provider_id;
+
+    /*
+    |--------------------------------------------------------------------------
+    | 🔐 Vérification OTP
+    |--------------------------------------------------------------------------
+    */
+    $cacheKey = "mobile_money_otp:{$user->id}:{$providerId}";
+    $cached   = Cache::get($cacheKey);
+
+    if (!$cached) {
+        return $this->errorResponse("OTP expiré ou invalide", 410);
+    }
+
+    if ((int) $cached['otp'] !== (int) $request->otp) {
+        return $this->errorResponse("OTP incorrect", 422);
+    }
+
+    /*
+    |--------------------------------------------------------------------------
+    | 💾 Activation définitive
+    |--------------------------------------------------------------------------
+    */
+    UsersMobileMoneyProviders::updateOrCreate(
+        [
+            'user_id'                  => $user->id,
+            'mobile_money_provider_id' => $providerId,
+        ],
+        [
+            'phone_number' => $cached['phone_number'],
+            'status'       => 'active',
+        ]
+    );
+
+    Cache::forget($cacheKey);
+
+    /*
+    |--------------------------------------------------------------------------
+    | 🔁 Recharger UNIQUEMENT le provider concerné
+    |--------------------------------------------------------------------------
+    */
+    $enterprise = $this->getEse($user->id);
+    if (!$enterprise) {
+        return $this->errorResponse("Entreprise introuvable", 404);
+    }
+
+    $provider = MobileMoneyProviders::query()
+        ->where('mobile_money_providers.enterprise_id', $enterprise->id)
+        ->where('mobile_money_providers.status', 'enabled')
+        ->where('mobile_money_providers.id', $providerId)
+        ->leftJoin(
+            'users_mobile_money_providers as ummp',
+            function ($join) use ($user) {
+                $join->on(
+                    'mobile_money_providers.id',
+                    '=',
+                    'ummp.mobile_money_provider_id'
+                )->where('ummp.user_id', $user->id);
+            }
+        )
+        ->select([
+            'mobile_money_providers.id',
+            'mobile_money_providers.provider',
+            'mobile_money_providers.name',
+            'mobile_money_providers.metadata',
+            'ummp.phone_number as user_phone',
+            'ummp.status as user_status',
+        ])
+        ->first();
+
+    if (!$provider) {
+        return $this->errorResponse("Provider introuvable", 404);
+    }
+
+    /*
+    |--------------------------------------------------------------------------
+    | 🧠 Mapping IDENTIQUE AU GET
+    |--------------------------------------------------------------------------
+    */
+    $data = [
+        'id'            => $provider->id,
+        'provider'      => $provider->provider,
+        'name'          => $provider->name,
+        'metadata'      => $provider->metadata,
+        'path'          => collect($provider->metadata)
+                            ->firstWhere('key', 'logo')['path'] ?? null,
+        'user_phone'    => $provider->user_phone,
+        'status'        => $provider->user_status,
+        'is_configured' => !is_null($provider->user_phone),
+    ];
+
+    /*
+    |--------------------------------------------------------------------------
+    | 📡 PUSH REDIS — UNE SEULE OCCURRENCE
+    |--------------------------------------------------------------------------
+    */
+    Redis::publish('user.mobilemoneyproviders', json_encode([
+        'type' => 'update',
+        'data' => [
+            'userId' => $user->id,
+            'record' => $data,
+        ]
+    ]));
+
+    return response()->json([
+        'status'  => 200,
+        'message' => 'Numéro Mobile Money validé',
+        'data'    => $data,
+    ]);
+}
+
+
+    // public function indexWithUserConfig($enterpriseId)
+    // {
+    //     $user = Auth::user();
+    //     if (!$user) {
+    //         return $this->errorResponse('Utilisateur non authentifié', 401);
+    //     }
+
+    //     if (!is_numeric($enterpriseId)) {
+    //         return $this->errorResponse('Enterprise ID invalide', 400);
+    //     }
+
+    //     $enterprise = $this->getEse($user->id);
+    //     if (!$enterprise) {
+    //         return $this->errorResponse('Entreprise introuvable', 404);
+    //     }
+
+    //     if ($enterprise->id != $enterpriseId) {
+    //         return $this->errorResponse("Vous n'appartenez pas à cette entreprise", 403);
+    //     }
+
+    //     try {
+    //        $providers = MobileMoneyProviders::where('enterprise_id', $enterpriseId)
+    // ->where('status', 'enabled')
+    // ->with(['users' => function ($q) use ($user) {
+    //     $q->wherePivot('user_id', $user->id);
+    // }])
+    // ->get();
+
+
+    //         if ($providers->isEmpty()) {
+    //             return $this->errorResponse(
+    //                 'Aucun provider mobile money trouvé pour cette entreprise',
+    //                 404
+    //             );
+    //         }
+
+    //         $data = $this->mapProvidersWithUserConfig($providers, $user);
+
+    //         return response()->json([
+    //             'status'  => 200,
+    //             'message' => 'success',
+    //             'error'   => null,
+    //             'data'    => $data,
+    //         ]);
+
+    //     } catch (\Throwable $e) {
+    //         return $this->errorResponse($e->getMessage(), 500);
+    //     }
+    // }
+
+
+     public function indexWithUserConfig($enterpriseId)
     {
-        $request->validate([
-            'mobile_money_provider_id' => 'required|integer',
-            'otp'                      => 'required|string',
-        ]);
-
         $user = Auth::user();
-        $providerId = $request->mobile_money_provider_id;
-
-        $cacheKey = "mobile_money_otp:{$user->id}:{$providerId}";
-        $cached = Cache::get($cacheKey);
-
-        if (!$cached) {
-            return $this->errorResponse("OTP expiré ou invalide", 410);
+        if (!$user) {
+            return $this->errorResponse('Utilisateur non authentifié', 401);
         }
 
-        if ((int) $cached['otp'] !== (int) $request->otp) {
-            return $this->errorResponse("OTP incorrect".$cached['otp']."=>".$request->otp, 422);
+        if (!is_numeric($enterpriseId)) {
+            return $this->errorResponse('Enterprise ID invalide', 400);
         }
 
-        // 💾 Activation définitive
-        $record = UsersMobileMoneyProviders::updateOrCreate(
-            [
-                'user_id'                  => $user->id,
-                'mobile_money_provider_id' => $providerId,
-            ],
-            [
-                'phone_number' => $cached['phone_number'],
-                'status'       => 'active',
-            ]
-        );
+        $enterprise = $this->getEse($user->id);
+        if (!$enterprise) {
+            return $this->errorResponse('Entreprise introuvable', 404);
+        }
 
-        // 🧹 Nettoyage cache
-        Cache::forget($cacheKey);
+        if ($enterprise->id != $enterpriseId) {
+            return $this->errorResponse("Vous n'appartenez pas à cette entreprise", 403);
+        }
 
-        return response()->json([
-            'status'  => 200,
-            'message' => 'Numéro Mobile Money validé',
-            'data'    => $this->show($record),
-        ]);
+        try {
+            // Providers actifs de l'entreprise
+            $providers = MobileMoneyProviders::where('enterprise_id', $enterpriseId)
+                ->where('status', 'enabled')
+                ->with(['users' => function ($q) use ($user) {
+                    $q->where('user_id', $user->id);
+                }])
+                ->get();
+
+            if ($providers->isEmpty()) {
+                return $this->errorResponse(
+                    'Aucun provider mobile money trouvé pour cette entreprise',
+                    404
+                );
+            }
+
+            // Mapping clean pour le frontend
+            $data = $providers->map(function ($provider) {
+
+                $userPivot = $provider->users->first()?->pivot;
+
+                return [
+                    'id'            => $provider->id,
+                    'provider'      => $provider->provider,
+                    'name'          => $provider->name,
+                    'metadata'      => $provider->metadata,
+                    'path'          => collect($provider->metadata)
+                                        ->firstWhere('key', 'logo')['path'] ?? null,
+                    'user_phone'    => $userPivot?->phone_number,
+                    'status'        => $userPivot?->status,
+                    'is_configured' => $userPivot !== null,
+                ];
+            });
+
+            return response()->json([
+                'status'  => 200,
+                'message' => 'success',
+                'error'   => null,
+                'data'    => $data,
+            ]);
+
+        } catch (\Throwable $e) {
+            return $this->errorResponse(
+                $e->getMessage(),
+                500
+            );
+        }
+    } 
+
+    private function mapProvidersWithUserConfig($providers, $user)
+    {
+        return $providers->map(function ($provider) use ($user) {
+
+            $userPivot = $provider->users
+                ->where('user_id', $user->id)
+                ->first()?->pivot;
+
+            return [
+                'id'            => $provider->id,
+                'provider'      => $provider->provider,
+                'name'          => $provider->name,
+                'metadata'      => $provider->metadata,
+                'path'          => collect($provider->metadata)
+                                    ->firstWhere('key', 'logo')['path'] ?? null,
+
+                // 🔑 CONFIG USER
+                'user_phone'    => $userPivot?->phone_number,
+                'status'        => $userPivot?->status,
+                'is_configured' => $userPivot !== null,
+            ];
+        });
     }
 
     public function store(Request $request)
@@ -243,11 +475,20 @@ class UsersMobileMoneyProvidersController extends Controller
                 ]
             );
 
+            $datatosend=$this->show($record);
+            //    Redis::publish('user.mobilemoneyproviders', json_encode([
+            //         'type' => 'update',
+            //         'data' => [
+            //             'userId'=> $record->user_id,
+            //             'record' => $datatosend,
+            //         ]
+            //     ]));
+
             return response()->json([
                 'status'  => 200,
                 'message' => 'success',
                 'error'   => null,
-                'data'    => $this->show($record),
+                'data'    => $datatosend,
             ]);
 
         } catch (\Throwable $e) {
